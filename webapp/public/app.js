@@ -8,7 +8,7 @@ const API_BASE = 'https://power-api.loe.lviv.ua/api';
 const CORS_PROXY = 'https://corsproxy.io/?';
 
 // Version
-const VERSION = 'v1.3';
+const VERSION = 'v1.4';
 console.log('LOE WebApp ' + VERSION);
 
 // State management
@@ -138,9 +138,11 @@ function filterItems(items, searchTerm, type) {
             return name.includes(term) || fullName.includes(term);
         });
     } else {
-        filtered = items.filter(item => 
-            item.name.toLowerCase().includes(term)
-        );
+        // Buildings use buildingName field
+        filtered = items.filter(item => {
+            const bName = (item.buildingName || item.name || '').toLowerCase();
+            return bName.includes(term);
+        });
     }
     
     return filtered.slice(0, 20); // Limit to 20 results
@@ -164,8 +166,9 @@ function renderDropdown(dropdown, items, type) {
                 : item.name;
             info = '';
         } else {
-            name = item.name;
-            const gpv = item.chergGpv || item.gpv || '';
+            // Buildings use buildingName field
+            name = item.buildingName || item.name || '';
+            const gpv = item.chergGpv || '';
             info = gpv ? `Черга: ${formatGroup(gpv)}` : '';
         }
         
@@ -202,7 +205,8 @@ function selectItem(type, item) {
             ? `${item.streetType.shortName} ${item.name}` 
             : item.name;
     } else {
-        displayName = item.name;
+        // Buildings use buildingName field
+        displayName = item.buildingName || item.name || '';
     }
     
     searchInput.value = displayName;
@@ -270,9 +274,10 @@ function showResult() {
         ? `${street.streetType.shortName} ${street.name}` 
         : street.name;
     
-    elements.resultAddress.textContent = `${city.name}, ${streetName}, ${building.name}`;
+    const buildingName = building.buildingName || building.name || '';
+    elements.resultAddress.textContent = `${city.name}, ${streetName}, ${buildingName}`;
     
-    const gpv = building.chergGpv || building.gpv || '';
+    const gpv = building.chergGpv || '';
     elements.resultGroup.textContent = gpv ? formatGroup(gpv) : 'Невідома';
     
     elements.result.style.display = 'block';
@@ -339,8 +344,8 @@ function submitSelection() {
         city_name: state.selected.city.name,
         street_id: street.id,
         street_name: streetName,
-        building_name: building.name,
-        cherg_gpv: building.chergGpv || building.gpv || ''
+        building_name: building.buildingName || building.name || '',
+        cherg_gpv: building.chergGpv || ''
     };
     
     try { tg.HapticFeedback.notificationOccurred('success'); } catch(e) {}
