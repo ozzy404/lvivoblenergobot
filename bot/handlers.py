@@ -1,0 +1,437 @@
+"""
+Telegram Bot handlers
+"""
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram.ext import ContextTypes
+from telegram.constants import ParseMode
+
+from database import db
+from api_service import api_service
+from config import WEBAPP_URL
+
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler для команди /start"""
+    user = update.effective_user
+    
+    # Зберегти користувача в БД
+    await db.add_user(
+        user_id=user.id,
+        username=user.username,
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
+    
+    # Перевірити чи є збережена адреса
+    address = await db.get_user_address(user.id)
+    
+    welcome_text = (
+        f"👋 Вітаю, {user.first_name}!\n\n"
+        f"🔌 Я бот для відстеження графіків відключень електроенергії у Львівській області.\n\n"
+    )
+    
+    if address:
+        cherg_gpv = address.get("cherg_gpv", "")
+        formatted_group = await api_service.get_schedule_group(cherg_gpv)
+        
+        welcome_text += (
+            f"📍 <b>Ваша адреса:</b>\n"
+            f"   {address['city_name']}, {address['street_name']}, {address['building_name']}\n"
+            f"⚡ <b>Група ГПВ:</b> {formatted_group}\n\n"
+        )
+    else:
+        welcome_text += (
+            f"📍 Ви ще не налаштували свою адресу.\n"
+            f"Натисніть кнопку нижче щоб обрати своє місто, вулицю та будинок.\n\n"
+        )
+    
+    welcome_text += "Оберіть дію:"
+    
+    keyboard = get_main_keyboard(address is not None)
+    
+    await update.message.reply_text(
+        welcome_text,
+        reply_markup=keyboard,
+        parse_mode=ParseMode.HTML
+    )
+
+
+def get_main_keyboard(has_address: bool = False) -> InlineKeyboardMarkup:
+    """Отримати головну клавіатуру"""
+    buttons = []
+    
+    # Кнопка для відкриття Web App
+    buttons.append([
+        InlineKeyboardButton(
+            "📍 Налаштувати адресу",
+            web_app=WebAppInfo(url=WEBAPP_URL)
+        )
+    ])
+    
+    if has_address:
+        buttons.append([
+            InlineKeyboardButton("⚡ Показати графік", callback_data="show_schedule")
+        ])
+        buttons.append([
+            InlineKeyboardButton("🔔 Сповіщення", callback_data="notifications"),
+            InlineKeyboardButton("📋 Мої адреси", callback_data="my_addresses")
+        ])
+    
+    buttons.append([
+        InlineKeyboardButton("ℹ️ Допомога", callback_data="help"),
+        InlineKeyboardButton("📊 Інформація", callback_data="info")
+    ])
+    
+    return InlineKeyboardMarkup(buttons)
+
+
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler для callback кнопок"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    data = query.data
+    
+    if data == "show_schedule":
+        await show_schedule(query, user_id)
+    
+    elif data == "notifications":
+        await show_notifications_menu(query, user_id)
+    
+    elif data == "enable_notifications":
+        await toggle_notifications(query, user_id, True)
+    
+    elif data == "disable_notifications":
+        await toggle_notifications(query, user_id, False)
+    
+    elif data == "my_addresses":
+        await show_addresses(query, user_id)
+    
+    elif data.startswith("delete_address_"):
+        address_id = int(data.replace("delete_address_", ""))
+        await delete_address(query, user_id, address_id)
+    
+    elif data == "help":
+        await show_help(query)
+    
+    elif data == "info":
+        await show_info(query)
+    
+    elif data == "back_to_main":
+        address = await db.get_user_address(user_id)
+        await query.edit_message_text(
+            "🏠 Головне меню\n\nОберіть дію:",
+            reply_markup=get_main_keyboard(address is not None),
+            parse_mode=ParseMode.HTML
+        )
+
+
+async def show_schedule(query, user_id: int):
+    """Показати поточний графік"""
+    try:
+        address = await db.get_user_address(user_id)
+        
+        if not address:
+            await query.edit_message_text(
+                "❌ Ви ще не налаштували свою адресу.\n"
+                "Натисніть кнопку 'Налаштувати адресу' щоб обрати своє місто, вулицю та будинок.",
+                reply_markup=get_main_keyboard(False),
+                parse_mode=ParseMode.HTML
+            )
+            return
+        
+        # Отримати поточний графік
+        grafics = await api_service.get_current_grafics()
+        
+        if not grafics or not grafics.get("imageUrl"):
+            await query.edit_message_text(
+                "⚠️ Наразі немає доступних графіків відключень.",
+                reply_markup=get_main_keyboard(True),
+                parse_mode=ParseMode.HTML
+            )
+            return
+        
+        image_url = grafics.get("imageUrl", "")
+        full_image_url = f"https://api.loe.lviv.ua{image_url}"
+        
+        cherg_gpv = address.get("cherg_gpv", "")
+        formatted_group = await api_service.get_schedule_group(cherg_gpv)
+        
+        sync_time = await api_service.get_sync_time()
+        sync_info = f"\n🕐 Оновлено: {sync_time}" if sync_time else ""
+        
+        message = (
+            f"⚡ <b>Графік погодинних відключень</b>\n\n"
+            f"📍 <b>Ваша адреса:</b>\n"
+            f"   {address['city_name']}, {address['street_name']}, {address['building_name']}\n\n"
+            f"🔌 <b>Ваша група ГПВ:</b> {formatted_group}\n"
+            f"{sync_info}"
+        )
+        
+        # Видалити старе повідомлення і відправити нове з фото
+        await query.message.delete()
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Оновити", callback_data="show_schedule")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
+        ])
+        
+        await query.message.chat.send_photo(
+            photo=full_image_url,
+            caption=message,
+            reply_markup=keyboard,
+            parse_mode=ParseMode.HTML
+        )
+        
+    except Exception as e:
+        print(f"Error showing schedule: {e}")
+        await query.edit_message_text(
+            "❌ Помилка при отриманні графіку. Спробуйте пізніше.",
+            reply_markup=get_main_keyboard(True),
+            parse_mode=ParseMode.HTML
+        )
+
+
+async def show_notifications_menu(query, user_id: int):
+    """Показати меню налаштувань сповіщень"""
+    user = await db.get_user(user_id)
+    notifications_enabled = user.get("notifications_enabled", False) if user else False
+    
+    status = "✅ Увімкнено" if notifications_enabled else "❌ Вимкнено"
+    
+    text = (
+        f"🔔 <b>Налаштування сповіщень</b>\n\n"
+        f"Статус: {status}\n\n"
+        f"Коли увімкнено, ви будете отримувати сповіщення про:\n"
+        f"• Оновлення графіку відключень\n"
+        f"• Зміни у вашій групі ГПВ"
+    )
+    
+    if notifications_enabled:
+        buttons = [
+            [InlineKeyboardButton("❌ Вимкнути сповіщення", callback_data="disable_notifications")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
+        ]
+    else:
+        buttons = [
+            [InlineKeyboardButton("✅ Увімкнути сповіщення", callback_data="enable_notifications")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
+        ]
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def toggle_notifications(query, user_id: int, enabled: bool):
+    """Увімкнути/вимкнути сповіщення"""
+    success = await db.set_notifications(user_id, enabled)
+    
+    if success:
+        status = "увімкнено ✅" if enabled else "вимкнено ❌"
+        await query.answer(f"Сповіщення {status}")
+    else:
+        await query.answer("Помилка при зміні налаштувань")
+    
+    await show_notifications_menu(query, user_id)
+
+
+async def show_addresses(query, user_id: int):
+    """Показати список адрес користувача"""
+    addresses = await db.get_all_user_addresses(user_id)
+    
+    if not addresses:
+        await query.edit_message_text(
+            "📋 У вас немає збережених адрес.\n\n"
+            "Натисніть 'Налаштувати адресу' щоб додати.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
+            ]),
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
+    text = "📋 <b>Ваші збережені адреси:</b>\n\n"
+    buttons = []
+    
+    for i, addr in enumerate(addresses, 1):
+        primary = " ⭐" if addr["is_primary"] else ""
+        cherg_gpv = addr.get("cherg_gpv", "")
+        formatted_group = await api_service.get_schedule_group(cherg_gpv)
+        
+        text += (
+            f"{i}. {addr['city_name']}, {addr['street_name']}, {addr['building_name']}{primary}\n"
+            f"   Група ГПВ: {formatted_group}\n\n"
+        )
+        
+        buttons.append([
+            InlineKeyboardButton(f"🗑 Видалити адресу {i}", callback_data=f"delete_address_{addr['id']}")
+        ])
+    
+    buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")])
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def delete_address(query, user_id: int, address_id: int):
+    """Видалити адресу"""
+    success = await db.delete_user_address(address_id, user_id)
+    
+    if success:
+        await query.answer("Адресу видалено")
+    else:
+        await query.answer("Помилка при видаленні")
+    
+    await show_addresses(query, user_id)
+
+
+async def show_help(query):
+    """Показати допомогу"""
+    text = (
+        "ℹ️ <b>Допомога</b>\n\n"
+        "<b>Як користуватись ботом:</b>\n\n"
+        "1️⃣ <b>Налаштувати адресу</b>\n"
+        "   Натисніть кнопку і оберіть своє місто, вулицю та номер будинку.\n\n"
+        "2️⃣ <b>Показати графік</b>\n"
+        "   Перегляньте актуальний графік відключень для вашої групи.\n\n"
+        "3️⃣ <b>Сповіщення</b>\n"
+        "   Увімкніть сповіщення, щоб отримувати оновлення про зміни графіку.\n\n"
+        "<b>Команди:</b>\n"
+        "/start - Головне меню\n"
+        "/schedule - Показати графік\n"
+        "/notifications - Налаштування сповіщень\n"
+        "/help - Ця довідка"
+    )
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
+        ]),
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def show_info(query):
+    """Показати інформацію про бота"""
+    sync_time = await api_service.get_sync_time()
+    sync_info = f"🕐 Останнє оновлення даних: {sync_time}" if sync_time else ""
+    
+    text = (
+        "📊 <b>Інформація</b>\n\n"
+        "Цей бот показує графіки погодинних відключень електроенергії "
+        "у Львівській області на основі даних з офіційного сайту Львівобленерго.\n\n"
+        f"{sync_info}\n\n"
+        "🌐 Джерело даних: <a href='https://poweron.loe.lviv.ua'>poweron.loe.lviv.ua</a>\n\n"
+        "📧 Зв'язок: @your_username"
+    )
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
+        ]),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True
+    )
+
+
+async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler для команди /schedule"""
+    from notifications import notification_service
+    if notification_service:
+        await notification_service.send_schedule_to_user(update.effective_user.id)
+
+
+async def notifications_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler для команди /notifications"""
+    user_id = update.effective_user.id
+    user = await db.get_user(user_id)
+    notifications_enabled = user.get("notifications_enabled", False) if user else False
+    
+    status = "✅ Увімкнено" if notifications_enabled else "❌ Вимкнено"
+    
+    text = (
+        f"🔔 <b>Налаштування сповіщень</b>\n\n"
+        f"Статус: {status}"
+    )
+    
+    if notifications_enabled:
+        buttons = [[InlineKeyboardButton("❌ Вимкнути", callback_data="disable_notifications")]]
+    else:
+        buttons = [[InlineKeyboardButton("✅ Увімкнути", callback_data="enable_notifications")]]
+    
+    await update.message.reply_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler для команди /help"""
+    text = (
+        "ℹ️ <b>Допомога</b>\n\n"
+        "<b>Доступні команди:</b>\n\n"
+        "/start - Головне меню\n"
+        "/schedule - Показати графік відключень\n"
+        "/notifications - Налаштування сповіщень\n"
+        "/help - Ця довідка\n\n"
+        "Для налаштування адреси натисніть /start і оберіть 'Налаштувати адресу'."
+    )
+    
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
+async def webapp_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler для даних з Web App"""
+    import json
+    
+    try:
+        data = json.loads(update.effective_message.web_app_data.data)
+        user_id = update.effective_user.id
+        
+        # Зберегти адресу
+        success = await db.save_user_address(
+            user_id=user_id,
+            otg_id=data.get("otgId"),
+            otg_name=data.get("otgName", ""),
+            city_id=data["cityId"],
+            city_name=data["cityName"],
+            street_id=data["streetId"],
+            street_name=data["streetName"],
+            building_name=data["buildingName"],
+            cherg_gpv=data.get("chergGpv", "")
+        )
+        
+        if success:
+            formatted_group = await api_service.get_schedule_group(data.get("chergGpv", ""))
+            
+            await update.message.reply_text(
+                f"✅ Адресу збережено!\n\n"
+                f"📍 {data['cityName']}, {data['streetName']}, {data['buildingName']}\n"
+                f"⚡ Група ГПВ: {formatted_group}\n\n"
+                f"Тепер ви можете переглядати графіки відключень.",
+                reply_markup=get_main_keyboard(True),
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Помилка при збереженні адреси. Спробуйте ще раз.",
+                reply_markup=get_main_keyboard(False),
+                parse_mode=ParseMode.HTML
+            )
+            
+    except Exception as e:
+        print(f"Error processing webapp data: {e}")
+        await update.message.reply_text(
+            "❌ Помилка при обробці даних. Спробуйте ще раз.",
+            parse_mode=ParseMode.HTML
+        )
