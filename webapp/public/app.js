@@ -1,10 +1,15 @@
 // Telegram Web App initialization
 const tg = window.Telegram.WebApp;
 tg.expand();
-tg.enableClosingConfirmation();
+try { tg.enableClosingConfirmation(); } catch(e) {}
 
-// API Configuration
+// API Configuration - use CORS proxy
 const API_BASE = 'https://power-api.loe.lviv.ua/api';
+const CORS_PROXY = 'https://corsproxy.io/?';
+
+// Version
+const VERSION = 'v1.2';
+console.log('LOE WebApp ' + VERSION);
 
 // State management
 const state = {
@@ -52,10 +57,21 @@ const elements = {
 
 // API Functions
 async function fetchData(endpoint) {
-    const response = await fetch(`${API_BASE}${endpoint}`);
-    if (!response.ok) throw new Error('Network error');
-    const data = await response.json();
-    return data['hydra:member'] || data.member || data;
+    const url = `${API_BASE}${endpoint}`;
+    // Try direct first, then proxy
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Network error');
+        const data = await response.json();
+        return data['hydra:member'] || data.member || data;
+    } catch (e) {
+        // Use CORS proxy as fallback
+        console.log('Using CORS proxy...');
+        const proxyResponse = await fetch(CORS_PROXY + encodeURIComponent(url));
+        if (!proxyResponse.ok) throw new Error('Proxy error');
+        const data = await proxyResponse.json();
+        return data['hydra:member'] || data.member || data;
+    }
 }
 
 // Load all cities on start
