@@ -8,275 +8,262 @@ const API_BASE = 'https://power-api.loe.lviv.ua/api';
 
 // State management
 const state = {
-    otgs: [],
     cities: [],
     streets: [],
-    accounts: [],
+    buildings: [],
     selected: {
-        otg: null,
         city: null,
         street: null,
-        account: null
+        building: null
     },
     loading: false
 };
 
 // DOM Elements
 const elements = {
-    otgSearch: document.getElementById('otg-search'),
-    otgDropdown: document.getElementById('otg-dropdown'),
-    otgSelected: document.getElementById('otg-selected'),
-    otgSelectedText: document.getElementById('otg-selected-text'),
-    
     citySearch: document.getElementById('city-search'),
     cityDropdown: document.getElementById('city-dropdown'),
     citySelected: document.getElementById('city-selected'),
-    citySelectedText: document.getElementById('city-selected-text'),
+    cityClear: document.getElementById('city-clear'),
     
     streetSearch: document.getElementById('street-search'),
     streetDropdown: document.getElementById('street-dropdown'),
     streetSelected: document.getElementById('street-selected'),
-    streetSelectedText: document.getElementById('street-selected-text'),
+    streetClear: document.getElementById('street-clear'),
     
-    accountSearch: document.getElementById('account-search'),
-    accountDropdown: document.getElementById('account-dropdown'),
-    accountSelected: document.getElementById('account-selected'),
-    accountSelectedText: document.getElementById('account-selected-text'),
+    buildingSearch: document.getElementById('building-search'),
+    buildingDropdown: document.getElementById('building-dropdown'),
+    buildingSelected: document.getElementById('building-selected'),
+    buildingClear: document.getElementById('building-clear'),
     
-    cityStep: document.getElementById('city-step'),
-    streetStep: document.getElementById('street-step'),
-    accountStep: document.getElementById('account-step'),
+    stepCity: document.getElementById('step-city'),
+    stepStreet: document.getElementById('step-street'),
+    stepBuilding: document.getElementById('step-building'),
+    
+    result: document.getElementById('result'),
+    resultAddress: document.getElementById('result-address'),
+    resultGroup: document.getElementById('result-group'),
     
     submitBtn: document.getElementById('submit-btn'),
-    loadingIndicator: document.getElementById('loading'),
-    errorMessage: document.getElementById('error-message'),
-    retryBtn: document.getElementById('retry-btn')
+    loading: document.getElementById('loading'),
+    error: document.getElementById('error'),
+    errorMessage: document.getElementById('error-message')
 };
 
 // API Functions
 async function fetchData(endpoint) {
-    try {
-        const response = await fetch(`${API_BASE}${endpoint}`);
-        if (!response.ok) throw new Error('Network response was not ok');
-        return await response.json();
-    } catch (error) {
-        console.error('API Error:', error);
-        throw error;
-    }
+    const response = await fetch(`${API_BASE}${endpoint}`);
+    if (!response.ok) throw new Error('Network error');
+    const data = await response.json();
+    return data['hydra:member'] || data.member || data;
 }
 
-async function loadOtgs() {
+// Load all cities on start
+async function loadCities() {
     showLoading();
     try {
-        const data = await fetchData('/pw_otgs?pagination=false');
-        state.otgs = data['hydra:member'] || data.member || data;
+        state.cities = await fetchData('/pw_cities?pagination=false');
         hideLoading();
-        initSearchableDropdown('otg', state.otgs, formatOtg);
+        console.log(`Loaded ${state.cities.length} cities`);
     } catch (error) {
-        showError('Не вдалося завантажити список громад');
+        showError('Не вдалося завантажити населені пункти');
     }
 }
 
-async function loadCities(otgId) {
-    showLoading();
-    try {
-        const data = await fetchData(`/pw_cities?pagination=false&otg.id=${otgId}`);
-        state.cities = data['hydra:member'] || data.member || data;
-        hideLoading();
-        enableStep('city');
-        initSearchableDropdown('city', state.cities, formatCity);
-    } catch (error) {
-        showError('Не вдалося завантажити список міст');
-    }
-}
-
+// Load streets for selected city
 async function loadStreets(cityId) {
     showLoading();
     try {
-        const data = await fetchData(`/pw_streets?pagination=false&city.id=${cityId}`);
-        state.streets = data['hydra:member'] || data.member || data;
+        state.streets = await fetchData(`/pw_streets?pagination=false&city.id=${cityId}`);
         hideLoading();
         enableStep('street');
-        initSearchableDropdown('street', state.streets, formatStreet);
+        elements.streetSearch.focus();
     } catch (error) {
-        showError('Не вдалося завантажити список вулиць');
+        showError('Не вдалося завантажити вулиці');
     }
 }
 
-async function loadAccounts(cityId, streetId) {
+// Load buildings for selected city and street
+async function loadBuildings(cityId, streetId) {
     showLoading();
     try {
-        const data = await fetchData(`/pw_accounts?pagination=false&city.id=${cityId}&street.id=${streetId}`);
-        state.accounts = data['hydra:member'] || data.member || data;
+        state.buildings = await fetchData(`/pw_accounts?pagination=false&city.id=${cityId}&street.id=${streetId}`);
         hideLoading();
-        enableStep('account');
-        initSearchableDropdown('account', state.accounts, formatAccount);
+        enableStep('building');
+        elements.buildingSearch.focus();
     } catch (error) {
-        showError('Не вдалося завантажити список будинків');
+        showError('Не вдалося завантажити будинки');
     }
 }
 
-// Formatters
-function formatOtg(otg) {
-    return {
-        id: otg.id,
-        name: otg.name || otg.title,
-        info: ''
-    };
-}
-
-function formatCity(city) {
-    return {
-        id: city.id,
-        name: city.name || city.title,
-        info: city.otg?.name || ''
-    };
-}
-
-function formatStreet(street) {
-    return {
-        id: street.id,
-        name: street.name || street.title,
-        info: street.streetType?.name || ''
-    };
-}
-
-function formatAccount(account) {
-    const building = account.name || account.building || account.budynok || '';
-    const group = account.chergGpv || account.gpv || '';
-    return {
-        id: account.id,
-        name: building,
-        info: group ? `Черга: ${formatGroup(group)}` : '',
-        rawData: account
-    };
-}
-
-function formatGroup(gpv) {
-    if (!gpv) return '';
-    const gpvStr = String(gpv);
-    if (gpvStr.length === 2) {
-        return `${gpvStr[0]}.${gpvStr[1]}`;
+// Filter and render dropdown items
+function filterItems(items, searchTerm, type) {
+    if (!searchTerm || searchTerm.length < 1) {
+        return [];
     }
-    return gpvStr;
-}
-
-// Dropdown functionality
-function initSearchableDropdown(type, items, formatter) {
-    const searchInput = elements[`${type}Search`];
-    const dropdown = elements[`${type}Dropdown`];
     
-    // Clear previous
-    dropdown.innerHTML = '';
-    searchInput.value = '';
+    const term = searchTerm.toLowerCase();
+    let filtered;
     
-    // Format and render items
-    const formattedItems = items.map(formatter);
-    renderDropdownItems(dropdown, formattedItems, type);
-    
-    // Search functionality
-    searchInput.addEventListener('input', (e) => {
-        const searchTerm = e.target.value.toLowerCase().trim();
-        const filtered = formattedItems.filter(item => 
-            item.name.toLowerCase().includes(searchTerm)
+    if (type === 'city') {
+        filtered = items.filter(item => 
+            item.name.toLowerCase().startsWith(term)
         );
-        renderDropdownItems(dropdown, filtered, type);
-        dropdown.classList.add('active');
-    });
+        // Also include items that contain the term but don't start with it
+        const containsItems = items.filter(item => 
+            !item.name.toLowerCase().startsWith(term) && 
+            item.name.toLowerCase().includes(term)
+        );
+        filtered = [...filtered, ...containsItems];
+    } else if (type === 'street') {
+        filtered = items.filter(item => {
+            const name = item.name.toLowerCase();
+            const fullName = `${item.streetType?.shortName || ''} ${item.name}`.toLowerCase();
+            return name.includes(term) || fullName.includes(term);
+        });
+    } else {
+        filtered = items.filter(item => 
+            item.name.toLowerCase().includes(term)
+        );
+    }
     
-    // Focus/blur handling
-    searchInput.addEventListener('focus', () => {
-        dropdown.classList.add('active');
-    });
-    
-    // Close dropdown when clicking outside
-    document.addEventListener('click', (e) => {
-        if (!e.target.closest(`#${type}-step`)) {
-            dropdown.classList.remove('active');
-        }
-    });
+    return filtered.slice(0, 20); // Limit to 20 results
 }
 
-function renderDropdownItems(dropdown, items, type) {
-    dropdown.innerHTML = items.map((item, index) => `
-        <div class="dropdown-item" data-id="${item.id}" data-index="${index}">
-            <div class="item-name">${escapeHtml(item.name)}</div>
-            ${item.info ? `<div class="item-info">${escapeHtml(item.info)}</div>` : ''}
-        </div>
-    `).join('');
+function renderDropdown(dropdown, items, type) {
+    if (items.length === 0) {
+        dropdown.classList.remove('active');
+        return;
+    }
+    
+    dropdown.innerHTML = items.map(item => {
+        let name, info;
+        
+        if (type === 'city') {
+            name = item.name;
+            info = item.otg?.name || '';
+        } else if (type === 'street') {
+            name = item.streetType?.shortName 
+                ? `${item.streetType.shortName} ${item.name}` 
+                : item.name;
+            info = '';
+        } else {
+            name = item.name;
+            const gpv = item.chergGpv || item.gpv || '';
+            info = gpv ? `Черга: ${formatGroup(gpv)}` : '';
+        }
+        
+        return `
+            <div class="dropdown-item" data-id="${item.id}">
+                <div class="item-name">${escapeHtml(name)}</div>
+                ${info ? `<div class="item-info">${escapeHtml(info)}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+    
+    dropdown.classList.add('active');
     
     // Add click handlers
     dropdown.querySelectorAll('.dropdown-item').forEach(el => {
         el.addEventListener('click', () => {
-            const id = el.dataset.id;
-            const item = items.find(i => String(i.id) === id);
-            selectItem(type, item);
+            const id = parseInt(el.dataset.id);
+            const item = items.find(i => i.id === id);
+            if (item) selectItem(type, item);
         });
     });
 }
 
 function selectItem(type, item) {
-    const dropdown = elements[`${type}Dropdown`];
     const searchInput = elements[`${type}Search`];
+    const dropdown = elements[`${type}Dropdown`];
     const selectedDiv = elements[`${type}Selected`];
-    const selectedText = elements[`${type}SelectedText`];
     
-    // Update UI
-    searchInput.value = item.name;
-    dropdown.classList.remove('active');
-    selectedDiv.classList.add('active');
-    selectedText.textContent = item.name;
-    
-    // Update state
-    state.selected[type] = item;
-    
-    // Handle dependent dropdowns
-    switch(type) {
-        case 'otg':
-            resetStep('city');
-            resetStep('street');
-            resetStep('account');
-            loadCities(item.id);
-            break;
-        case 'city':
-            resetStep('street');
-            resetStep('account');
-            loadStreets(item.id);
-            break;
-        case 'street':
-            resetStep('account');
-            loadAccounts(state.selected.city.id, item.id);
-            break;
-        case 'account':
-            enableSubmit();
-            break;
+    let displayName;
+    if (type === 'city') {
+        displayName = item.name;
+    } else if (type === 'street') {
+        displayName = item.streetType?.shortName 
+            ? `${item.streetType.shortName} ${item.name}` 
+            : item.name;
+    } else {
+        displayName = item.name;
     }
     
+    searchInput.value = displayName;
+    dropdown.classList.remove('active');
+    selectedDiv.innerHTML = `<span class="check">✓</span> ${escapeHtml(displayName)}`;
+    selectedDiv.classList.add('active');
+    
+    state.selected[type] = item;
+    
     // Haptic feedback
-    tg.HapticFeedback.selectionChanged();
+    try { tg.HapticFeedback.selectionChanged(); } catch(e) {}
+    
+    // Handle next step
+    if (type === 'city') {
+        resetStep('street');
+        resetStep('building');
+        hideResult();
+        loadStreets(item.id);
+    } else if (type === 'street') {
+        resetStep('building');
+        hideResult();
+        loadBuildings(state.selected.city.id, item.id);
+    } else if (type === 'building') {
+        showResult();
+        enableSubmit();
+    }
 }
 
 // Step management
 function enableStep(step) {
-    const stepEl = elements[`${step}Step`];
+    const stepEl = elements[`step${step.charAt(0).toUpperCase() + step.slice(1)}`];
+    const searchInput = elements[`${step}Search`];
+    
     stepEl.classList.remove('disabled');
-    elements[`${step}Search`].disabled = false;
-    stepEl.classList.add('fade-in');
+    searchInput.disabled = false;
 }
 
 function resetStep(step) {
-    const stepEl = elements[`${step}Step`];
+    const stepEl = elements[`step${step.charAt(0).toUpperCase() + step.slice(1)}`];
+    const searchInput = elements[`${step}Search`];
+    const dropdown = elements[`${step}Dropdown`];
+    const selectedDiv = elements[`${step}Selected`];
+    
     stepEl.classList.add('disabled');
-    elements[`${step}Search`].value = '';
-    elements[`${step}Search`].disabled = true;
-    elements[`${step}Dropdown`].innerHTML = '';
-    elements[`${step}Dropdown`].classList.remove('active');
-    elements[`${step}Selected`].classList.remove('active');
+    searchInput.value = '';
+    searchInput.disabled = true;
+    dropdown.innerHTML = '';
+    dropdown.classList.remove('active');
+    selectedDiv.innerHTML = '';
+    selectedDiv.classList.remove('active');
     state.selected[step] = null;
     
-    if (step === 'account') {
+    if (step === 'building') {
         disableSubmit();
     }
+}
+
+// Result display
+function showResult() {
+    const city = state.selected.city;
+    const street = state.selected.street;
+    const building = state.selected.building;
+    
+    const streetName = street.streetType?.shortName 
+        ? `${street.streetType.shortName} ${street.name}` 
+        : street.name;
+    
+    elements.resultAddress.textContent = `${city.name}, ${streetName}, ${building.name}`;
+    
+    const gpv = building.chergGpv || building.gpv || '';
+    elements.resultGroup.textContent = gpv ? formatGroup(gpv) : 'Невідома';
+    
+    elements.result.style.display = 'block';
+}
+
+function hideResult() {
+    elements.result.style.display = 'none';
 }
 
 // Submit button
@@ -288,26 +275,23 @@ function disableSubmit() {
     elements.submitBtn.disabled = true;
 }
 
-// Loading and error states
+// Loading and error
 function showLoading() {
-    elements.loadingIndicator.style.display = 'block';
-    elements.errorMessage.style.display = 'none';
-    state.loading = true;
+    elements.loading.style.display = 'block';
+    elements.error.style.display = 'none';
 }
 
 function hideLoading() {
-    elements.loadingIndicator.style.display = 'none';
-    state.loading = false;
+    elements.loading.style.display = 'none';
 }
 
 function showError(message) {
-    elements.loadingIndicator.style.display = 'none';
-    elements.errorMessage.style.display = 'block';
-    elements.errorMessage.querySelector('p').textContent = message;
-    state.loading = false;
+    elements.loading.style.display = 'none';
+    elements.error.style.display = 'block';
+    elements.errorMessage.textContent = message;
 }
 
-// Utility functions
+// Utility
 function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
@@ -315,53 +299,155 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Submit data to Telegram
+function formatGroup(gpv) {
+    if (!gpv) return '';
+    const str = String(gpv);
+    if (str.length === 2) {
+        return `${str[0]}.${str[1]}`;
+    }
+    return str;
+}
+
+// Submit to Telegram
 function submitSelection() {
-    const account = state.selected.account;
-    if (!account) return;
+    const building = state.selected.building;
+    if (!building) return;
+    
+    const street = state.selected.street;
+    const streetName = street.streetType?.shortName 
+        ? `${street.streetType.shortName} ${street.name}` 
+        : street.name;
     
     const data = {
         city_id: state.selected.city.id,
         city_name: state.selected.city.name,
-        street_id: state.selected.street.id,
-        street_name: state.selected.street.name,
-        building_name: account.name,
-        cherg_gpv: account.rawData?.chergGpv || account.rawData?.gpv || ''
+        street_id: street.id,
+        street_name: streetName,
+        building_name: building.name,
+        cherg_gpv: building.chergGpv || building.gpv || ''
     };
     
-    tg.HapticFeedback.notificationOccurred('success');
+    try { tg.HapticFeedback.notificationOccurred('success'); } catch(e) {}
     tg.sendData(JSON.stringify(data));
 }
 
-// Clear button handlers
-document.querySelectorAll('.clear-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-        const input = e.target.previousElementSibling;
-        input.value = '';
-        input.dispatchEvent(new Event('input'));
-        input.focus();
+// Event listeners
+function setupEventListeners() {
+    // City search
+    elements.citySearch.addEventListener('input', (e) => {
+        const term = e.target.value.trim();
+        const filtered = filterItems(state.cities, term, 'city');
+        renderDropdown(elements.cityDropdown, filtered, 'city');
     });
-});
-
-// Retry button handler
-elements.retryBtn.addEventListener('click', () => {
-    loadOtgs();
-});
-
-// Submit button handler
-elements.submitBtn.addEventListener('click', submitSelection);
+    
+    elements.citySearch.addEventListener('focus', () => {
+        const term = elements.citySearch.value.trim();
+        if (term.length >= 1) {
+            const filtered = filterItems(state.cities, term, 'city');
+            renderDropdown(elements.cityDropdown, filtered, 'city');
+        }
+    });
+    
+    // Street search
+    elements.streetSearch.addEventListener('input', (e) => {
+        const term = e.target.value.trim();
+        const filtered = filterItems(state.streets, term, 'street');
+        renderDropdown(elements.streetDropdown, filtered, 'street');
+    });
+    
+    elements.streetSearch.addEventListener('focus', () => {
+        const term = elements.streetSearch.value.trim();
+        if (term.length >= 1) {
+            const filtered = filterItems(state.streets, term, 'street');
+            renderDropdown(elements.streetDropdown, filtered, 'street');
+        }
+    });
+    
+    // Building search
+    elements.buildingSearch.addEventListener('input', (e) => {
+        const term = e.target.value.trim();
+        const filtered = filterItems(state.buildings, term, 'building');
+        renderDropdown(elements.buildingDropdown, filtered, 'building');
+    });
+    
+    elements.buildingSearch.addEventListener('focus', () => {
+        const term = elements.buildingSearch.value.trim();
+        if (term.length >= 1) {
+            const filtered = filterItems(state.buildings, term, 'building');
+            renderDropdown(elements.buildingDropdown, filtered, 'building');
+        }
+    });
+    
+    // Clear buttons
+    elements.cityClear.addEventListener('click', () => {
+        elements.citySearch.value = '';
+        elements.cityDropdown.classList.remove('active');
+        elements.citySelected.classList.remove('active');
+        elements.citySelected.innerHTML = '';
+        state.selected.city = null;
+        resetStep('street');
+        resetStep('building');
+        hideResult();
+        elements.citySearch.focus();
+    });
+    
+    elements.streetClear.addEventListener('click', () => {
+        elements.streetSearch.value = '';
+        elements.streetDropdown.classList.remove('active');
+        elements.streetSelected.classList.remove('active');
+        elements.streetSelected.innerHTML = '';
+        state.selected.street = null;
+        resetStep('building');
+        hideResult();
+        elements.streetSearch.focus();
+    });
+    
+    elements.buildingClear.addEventListener('click', () => {
+        elements.buildingSearch.value = '';
+        elements.buildingDropdown.classList.remove('active');
+        elements.buildingSelected.classList.remove('active');
+        elements.buildingSelected.innerHTML = '';
+        state.selected.building = null;
+        hideResult();
+        disableSubmit();
+        elements.buildingSearch.focus();
+    });
+    
+    // Close dropdowns on outside click
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#step-city')) {
+            elements.cityDropdown.classList.remove('active');
+        }
+        if (!e.target.closest('#step-street')) {
+            elements.streetDropdown.classList.remove('active');
+        }
+        if (!e.target.closest('#step-building')) {
+            elements.buildingDropdown.classList.remove('active');
+        }
+    });
+    
+    // Submit button
+    elements.submitBtn.addEventListener('click', submitSelection);
+    
+    // Retry button
+    document.querySelector('.retry-btn').addEventListener('click', () => {
+        location.reload();
+    });
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     tg.ready();
     
-    // Apply Telegram theme colors if available
+    // Apply Telegram theme
     if (tg.themeParams) {
-        document.documentElement.style.setProperty('--bg-primary', tg.themeParams.bg_color || '#1e1e2e');
-        document.documentElement.style.setProperty('--bg-secondary', tg.themeParams.secondary_bg_color || '#2d2d44');
-        document.documentElement.style.setProperty('--text-primary', tg.themeParams.text_color || '#ffffff');
-        document.documentElement.style.setProperty('--accent-color', tg.themeParams.button_color || '#6c5ce7');
+        const root = document.documentElement;
+        if (tg.themeParams.bg_color) root.style.setProperty('--bg-primary', tg.themeParams.bg_color);
+        if (tg.themeParams.secondary_bg_color) root.style.setProperty('--bg-secondary', tg.themeParams.secondary_bg_color);
+        if (tg.themeParams.text_color) root.style.setProperty('--text-primary', tg.themeParams.text_color);
+        if (tg.themeParams.button_color) root.style.setProperty('--accent-color', tg.themeParams.button_color);
     }
     
-    loadOtgs();
+    setupEventListeners();
+    loadCities();
 });

@@ -16,25 +16,12 @@
         </div>
         
         <div class="container">
-            <!-- Step 1: OTG Selection (Optional) -->
-            <div class="step" id="step-otg">
-                <div class="form-group">
-                    <label for="otg-search">🏛️ ОТГ (необов'язково)</label>
-                    <div class="search-container">
-                        <input type="text" id="otg-search" placeholder="Пошук ОТГ..." autocomplete="off">
-                        <button class="clear-btn" id="otg-clear">✕</button>
-                    </div>
-                    <div class="dropdown" id="otg-dropdown"></div>
-                    <div class="selected-value" id="otg-selected"></div>
-                </div>
-            </div>
-            
-            <!-- Step 2: City Selection -->
+            <!-- Step 1: City Selection -->
             <div class="step" id="step-city">
                 <div class="form-group">
-                    <label for="city-search">🏙️ Населений пункт *</label>
+                    <label for="city-search">🏙️ Населений пункт</label>
                     <div class="search-container">
-                        <input type="text" id="city-search" placeholder="Введіть назву..." autocomplete="off">
+                        <input type="text" id="city-search" placeholder="Введіть назву (напр. Львів)..." autocomplete="off">
                         <button class="clear-btn" id="city-clear">✕</button>
                     </div>
                     <div class="dropdown" id="city-dropdown"></div>
@@ -42,10 +29,10 @@
                 </div>
             </div>
             
-            <!-- Step 3: Street Selection -->
+            <!-- Step 2: Street Selection -->
             <div class="step disabled" id="step-street">
                 <div class="form-group">
-                    <label for="street-search">🛣️ Вулиця *</label>
+                    <label for="street-search">🛣️ Вулиця</label>
                     <div class="search-container">
                         <input type="text" id="street-search" placeholder="Введіть назву вулиці..." autocomplete="off" disabled>
                         <button class="clear-btn" id="street-clear">✕</button>
@@ -55,10 +42,10 @@
                 </div>
             </div>
             
-            <!-- Step 4: Building Selection -->
+            <!-- Step 3: Building Selection -->
             <div class="step disabled" id="step-building">
                 <div class="form-group">
-                    <label for="building-search">🏠 Номер будинку *</label>
+                    <label for="building-search">🏠 Номер будинку</label>
                     <div class="search-container">
                         <input type="text" id="building-search" placeholder="Введіть номер..." autocomplete="off" disabled>
                         <button class="clear-btn" id="building-clear">✕</button>
