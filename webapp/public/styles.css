@@ -79,8 +79,11 @@ body {
     color: var(--text-primary);
 }
 
-.search-container {
+.search-wrapper {
     position: relative;
+}
+
+.search-container {
     display: flex;
     align-items: center;
 }
