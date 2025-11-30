@@ -398,25 +398,33 @@ async def webapp_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         data = json.loads(update.effective_message.web_app_data.data)
         user_id = update.effective_user.id
         
+        # Дані приходять в snake_case з WebApp
+        city_id = data.get("city_id")
+        city_name = data.get("city_name", "")
+        street_id = data.get("street_id")
+        street_name = data.get("street_name", "")
+        building_name = data.get("building_name", "")
+        cherg_gpv = data.get("cherg_gpv", "")
+        
         # Зберегти адресу
         success = await db.save_user_address(
             user_id=user_id,
-            otg_id=data.get("otgId"),
-            otg_name=data.get("otgName", ""),
-            city_id=data["cityId"],
-            city_name=data["cityName"],
-            street_id=data["streetId"],
-            street_name=data["streetName"],
-            building_name=data["buildingName"],
-            cherg_gpv=data.get("chergGpv", "")
+            otg_id=None,
+            otg_name="",
+            city_id=city_id,
+            city_name=city_name,
+            street_id=street_id,
+            street_name=street_name,
+            building_name=building_name,
+            cherg_gpv=cherg_gpv
         )
         
         if success:
-            formatted_group = await api_service.get_schedule_group(data.get("chergGpv", ""))
+            formatted_group = await api_service.get_schedule_group(cherg_gpv)
             
             await update.message.reply_text(
                 f"✅ Адресу збережено!\n\n"
-                f"📍 {data['cityName']}, {data['streetName']}, {data['buildingName']}\n"
+                f"📍 {city_name}, {street_name}, {building_name}\n"
                 f"⚡ Група ГПВ: {formatted_group}\n\n"
                 f"Тепер ви можете переглядати графіки відключень.",
                 reply_markup=get_main_keyboard(True),
@@ -431,6 +439,8 @@ async def webapp_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             
     except Exception as e:
         print(f"Error processing webapp data: {e}")
+        import traceback
+        traceback.print_exc()
         await update.message.reply_text(
             "❌ Помилка при обробці даних. Спробуйте ще раз.",
             parse_mode=ParseMode.HTML
