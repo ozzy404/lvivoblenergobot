@@ -58,13 +58,15 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def get_main_keyboard(has_address: bool = False) -> InlineKeyboardMarkup:
     """Отримати головну клавіатуру"""
+    import time
     buttons = []
     
-    # Кнопка для відкриття Web App
+    # Кнопка для відкриття Web App з timestamp для обходу кешу
+    webapp_url = f"{WEBAPP_URL}?v={int(time.time())}"
     buttons.append([
         InlineKeyboardButton(
             "📍 Налаштувати адресу",
-            web_app=WebAppInfo(url=WEBAPP_URL)
+            web_app=WebAppInfo(url=webapp_url)
         )
     ])
     

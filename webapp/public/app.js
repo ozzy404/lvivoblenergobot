@@ -8,7 +8,7 @@ const API_BASE = 'https://power-api.loe.lviv.ua/api';
 const CORS_PROXY = 'https://corsproxy.io/?';
 
 // Version
-const VERSION = 'v1.5';
+const VERSION = 'v1.6';
 console.log('LOE WebApp ' + VERSION);
 
 // State management
