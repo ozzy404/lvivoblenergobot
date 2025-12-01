@@ -119,20 +119,28 @@ async function loadScheduleImage() {
     elements.scheduleError.style.display = 'none';
     
     try {
-        const data = await fetchData('/pages?synonym=power-top', true);
+        // Отримати графік з меню photo-grafic
+        const menuData = await fetchData('/menus?page=1&type=photo-grafic', true);
         
         let imageUrl = null;
-        if (Array.isArray(data) && data.length > 0) {
-            const page = data[0];
-            if (page.image) {
-                imageUrl = `https://api.loe.lviv.ua${page.image}`;
-            }
-        }
-        
-        if (!imageUrl) {
-            const grafics = await fetchData('/pages?synonym=grafics', true);
-            if (Array.isArray(grafics) && grafics.length > 0 && grafics[0].image) {
-                imageUrl = `https://api.loe.lviv.ua${grafics[0].image}`;
+        if (Array.isArray(menuData) && menuData.length > 0) {
+            const menu = menuData[0];
+            // Структура: menu.menuItems - це масив елементів меню
+            // Шукаємо елемент "Today" (id=240 з orders=0) або беремо перший з imageUrl
+            if (menu.menuItems && Array.isArray(menu.menuItems)) {
+                // Спочатку шукаємо елемент Today (orders=0)
+                let todayItem = menu.menuItems.find(item => item.orders === 0 || item.name === 'Today');
+                if (todayItem && todayItem.imageUrl) {
+                    imageUrl = `https://api.loe.lviv.ua${todayItem.imageUrl}`;
+                } else {
+                    // Або беремо перший елемент з imageUrl
+                    for (const item of menu.menuItems) {
+                        if (item.imageUrl) {
+                            imageUrl = `https://api.loe.lviv.ua${item.imageUrl}`;
+                            break;
+                        }
+                    }
+                }
             }
         }
         
@@ -183,11 +191,41 @@ async function loadStreets(cityId) {
 async function loadBuildings(cityId, streetId) {
     showLoading();
     try {
-        state.buildings = await fetchData(`/pw_accounts?pagination=false&city.id=${cityId}&street.id=${streetId}`);
+        const accounts = await fetchData(`/pw_accounts?pagination=false&city.id=${cityId}&street.id=${streetId}`);
+        
+        // Виділяємо унікальні будинки за buildingName
+        const uniqueBuildings = [];
+        const seenNames = new Set();
+        
+        for (const account of accounts) {
+            const name = account.buildingName || account.name || '';
+            if (name && !seenNames.has(name)) {
+                seenNames.add(name);
+                uniqueBuildings.push({
+                    id: account.id,
+                    buildingName: name,
+                    name: name,
+                    chergGpv: account.chergGpv || '',
+                    chergGav: account.chergGav || '',
+                    chergSgav: account.chergSgav || ''
+                });
+            }
+        }
+        
+        // Сортуємо будинки природнім чином (1, 2, 10, а не 1, 10, 2)
+        uniqueBuildings.sort((a, b) => {
+            const nameA = a.buildingName || '';
+            const nameB = b.buildingName || '';
+            return nameA.localeCompare(nameB, 'uk', { numeric: true });
+        });
+        
+        state.buildings = uniqueBuildings;
         hideLoading();
         enableStep('building');
         elements.buildingSearch.focus();
+        console.log(`Loaded ${uniqueBuildings.length} unique buildings`);
     } catch (error) {
+        console.error('Error loading buildings:', error);
         showError('Не вдалося завантажити будинки');
     }
 }
@@ -239,8 +277,15 @@ function formatGroup(gpv) {
 
 // ============ DROPDOWN ============
 function filterItems(items, searchTerm, type) {
-    if (!searchTerm || searchTerm.length < 1) {
-        return [];
+    // Для будинків показуємо всі якщо нічого не введено
+    if (type === 'building') {
+        if (!searchTerm || searchTerm.length < 1) {
+            return items.slice(0, 30); // Показати перші 30 будинків
+        }
+    } else {
+        if (!searchTerm || searchTerm.length < 1) {
+            return [];
+        }
     }
     
     const term = searchTerm.toLowerCase();
@@ -262,13 +307,14 @@ function filterItems(items, searchTerm, type) {
             return name.includes(term) || fullName.includes(term);
         });
     } else {
+        // Для будинків
         filtered = items.filter(item => {
             const bName = (item.buildingName || item.name || '').toLowerCase();
             return bName.includes(term);
         });
     }
     
-    return filtered.slice(0, 20);
+    return filtered.slice(0, 30);
 }
 
 function renderDropdown(dropdown, items, type) {
@@ -520,11 +566,10 @@ function setupEventListeners() {
     });
     
     elements.buildingSearch.addEventListener('focus', () => {
+        // Показуємо усі будинки при фокусі
         const term = elements.buildingSearch.value.trim();
-        if (term.length >= 1) {
-            const filtered = filterItems(state.buildings, term, 'building');
-            renderDropdown(elements.buildingDropdown, filtered, 'building');
-        }
+        const filtered = filterItems(state.buildings, term, 'building');
+        renderDropdown(elements.buildingDropdown, filtered, 'building');
     });
     
     // Clear buttons
