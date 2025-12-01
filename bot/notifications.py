@@ -98,24 +98,26 @@ class NotificationService:
         if not users:
             return
         
-        schedule = await api_service.get_schedule_image_for_today()
+        schedule = await api_service.get_current_grafics()
         
-        if not schedule:
+        if not schedule or not schedule.get("rawHtml"):
             print("No schedule available for today")
             return
         
         print(f"📢 Sending today's schedule to {len(users)} users...")
         
+        schedule_date = schedule.get("date", datetime.now().strftime("%Y-%m-%d"))
+        
         for user_data in users:
             user_id = user_data["user_id"]
             
             # Перевірити чи вже відправляли сьогодні
-            if await db.check_notification_sent(user_id, "daily_schedule", schedule.get("date")):
+            if await db.check_notification_sent(user_id, "daily_schedule", schedule_date):
                 continue
             
             try:
                 await self._send_schedule_message(user_id, user_data, schedule, "🌅", "на сьогодні")
-                await db.mark_notification_sent(user_id, "daily_schedule", schedule.get("date"))
+                await db.mark_notification_sent(user_id, "daily_schedule", schedule_date)
                 await asyncio.sleep(0.5)
             except Exception as e:
                 print(f"Error sending schedule to user {user_id}: {e}")
@@ -127,44 +129,59 @@ class NotificationService:
         if not users:
             return
         
-        schedule = await api_service.get_schedule_image_for_tomorrow()
+        schedule = await api_service.get_tomorrow_grafics()
         
-        if not schedule:
+        if not schedule or not schedule.get("rawHtml"):
             print("No schedule available for tomorrow yet")
             return
         
         print(f"📢 Sending tomorrow's schedule to {len(users)} users...")
         
+        schedule_date = schedule.get("date", "")
+        
         for user_data in users:
             user_id = user_data["user_id"]
             
-            if await db.check_notification_sent(user_id, "tomorrow_schedule", schedule.get("date")):
+            if await db.check_notification_sent(user_id, "tomorrow_schedule", schedule_date):
                 continue
             
             try:
                 await self._send_schedule_message(user_id, user_data, schedule, "🌆", "на завтра")
-                await db.mark_notification_sent(user_id, "tomorrow_schedule", schedule.get("date"))
+                await db.mark_notification_sent(user_id, "tomorrow_schedule", schedule_date)
                 await asyncio.sleep(0.5)
             except Exception as e:
                 print(f"Error sending tomorrow schedule to user {user_id}: {e}")
     
     async def _send_schedule_message(self, user_id: int, user_data: dict, schedule: dict, icon: str, period: str):
-        """Відправити повідомлення з графіком"""
+        """Відправити повідомлення з персоналізованим графіком"""
         cherg_gpv = user_data.get("cherg_gpv", "")
         formatted_group = await api_service.get_schedule_group(cherg_gpv)
+        
+        # Парсити графік для групи користувача
+        raw_html = schedule.get("rawHtml", "")
+        parsed_schedule = api_service.parse_schedule_for_group(raw_html, cherg_gpv)
+        outages = parsed_schedule.get("outages", [])
+        
+        # Форматувати текст відключень
+        if outages:
+            outage_text = ""
+            for outage in outages:
+                outage_text += f"   🔴 <b>{outage['start']} - {outage['end']}</b>\n"
+        else:
+            outage_text = "   🟢 <b>Відключень не заплановано</b>\n"
         
         message = (
             f"{icon} <b>Графік погодинних відключень {period}</b>\n\n"
             f"📍 <b>Ваша адреса:</b>\n"
             f"   {user_data['city_name']}, {user_data['street_name']}, {user_data['building_name']}\n\n"
             f"⚡ <b>Ваша група ГПВ:</b> {formatted_group}\n\n"
-            f"Перевірте графік на зображенні нижче 👇"
+            f"⏰ <b>Графік відключень:</b>\n"
+            f"{outage_text}"
         )
         
-        await self.bot.send_photo(
+        await self.bot.send_message(
             chat_id=user_id,
-            photo=schedule["image_url"],
-            caption=message,
+            text=message,
             parse_mode=ParseMode.HTML
         )
     
@@ -176,31 +193,35 @@ class NotificationService:
             if not grafics:
                 return
             
-            current_image_url = grafics.get("imageUrl", "")
             raw_html = grafics.get("rawHtml", "")
             schedule_date = grafics.get("date", "")
+            current_image_url = grafics.get("imageUrl", "")
             
-            if not current_image_url:
+            if not raw_html:
                 return
             
-            full_image_url = f"https://api.loe.lviv.ua{current_image_url}"
+            full_image_url = f"https://api.loe.lviv.ua{current_image_url}" if current_image_url else ""
             
-            # Перевірити чи змінився графік
-            if self.last_image_url and full_image_url != self.last_image_url:
-                print(f"📢 Schedule updated: {full_image_url}")
+            # Перевірити чи змінився графік (використовуємо rawHtml як основний ідентифікатор)
+            # Створюємо хеш з rawHtml для порівняння
+            import hashlib
+            current_hash = hashlib.md5(raw_html.encode()).hexdigest()
+            
+            if self.last_image_url and current_hash != self.last_image_url:
+                print(f"📢 Schedule updated! Hash changed.")
                 
                 # Зберегти новий хеш
-                is_new = await db.save_schedule_hash(schedule_date, full_image_url, raw_html)
+                is_new = await db.save_schedule_hash(schedule_date, current_hash, raw_html)
                 
                 if is_new:
-                    await self.send_change_notifications(full_image_url)
+                    await self.send_change_notifications(raw_html, schedule_date)
             
-            self.last_image_url = full_image_url
+            self.last_image_url = current_hash
                 
         except Exception as e:
             print(f"Error checking for updates: {e}")
     
-    async def send_change_notifications(self, image_url: str):
+    async def send_change_notifications(self, raw_html: str, schedule_date: str):
         """Відправити сповіщення всім підписаним користувачам про зміни"""
         users = await db.get_users_with_notifications()
         
@@ -214,17 +235,30 @@ class NotificationService:
                 cherg_gpv = user.get("cherg_gpv", "")
                 formatted_group = await api_service.get_schedule_group(cherg_gpv)
                 
+                # Парсити персоналізований графік
+                parsed_schedule = api_service.parse_schedule_for_group(raw_html, cherg_gpv)
+                outages = parsed_schedule.get("outages", [])
+                
+                # Форматувати текст відключень
+                if outages:
+                    outage_text = ""
+                    for outage in outages:
+                        outage_text += f"   🔴 <b>{outage['start']} - {outage['end']}</b>\n"
+                else:
+                    outage_text = "   🟢 <b>Відключень не заплановано</b>\n"
+                
                 message = (
                     f"⚠️ <b>УВАГА! Графік відключень змінився!</b>\n\n"
-                    f"📍 Ваша адреса: {user['city_name']}, {user['street_name']}, {user['building_name']}\n"
-                    f"⚡ Група ГПВ: <b>{formatted_group}</b>\n\n"
-                    f"Перегляньте новий графік нижче 👇"
+                    f"📍 <b>Ваша адреса:</b>\n"
+                    f"   {user['city_name']}, {user['street_name']}, {user['building_name']}\n\n"
+                    f"⚡ <b>Група ГПВ:</b> {formatted_group}\n\n"
+                    f"⏰ <b>Новий графік відключень:</b>\n"
+                    f"{outage_text}"
                 )
                 
-                await self.bot.send_photo(
+                await self.bot.send_message(
                     chat_id=user["user_id"],
-                    photo=image_url,
-                    caption=message,
+                    text=message,
                     parse_mode=ParseMode.HTML
                 )
                 
@@ -249,7 +283,7 @@ class NotificationService:
             
             grafics = await api_service.get_current_grafics()
             
-            if not grafics or not grafics.get("imageUrl"):
+            if not grafics or not grafics.get("rawHtml"):
                 await self.bot.send_message(
                     chat_id=user_id,
                     text="⚠️ Наразі немає доступних графіків відключень.",
@@ -257,11 +291,58 @@ class NotificationService:
                 )
                 return False
             
-            image_url = grafics.get("imageUrl", "")
-            full_image_url = f"https://api.loe.lviv.ua{image_url}"
-            
+            raw_html = grafics.get("rawHtml", "")
             cherg_gpv = address.get("cherg_gpv", "")
             formatted_group = await api_service.get_schedule_group(cherg_gpv)
+            
+            # Парсити персоналізований графік
+            parsed_schedule = api_service.parse_schedule_for_group(raw_html, cherg_gpv)
+            outages = parsed_schedule.get("outages", [])
+            
+            # Визначити поточний статус
+            from datetime import datetime
+            now = datetime.now()
+            current_minutes = now.hour * 60 + now.minute
+            
+            is_power_on = True
+            next_change_time = None
+            
+            for outage in outages:
+                start_h, start_m = map(int, outage["start"].split(":"))
+                end_h, end_m = map(int, outage["end"].split(":"))
+                start_minutes = start_h * 60 + start_m
+                end_minutes = end_h * 60 + end_m
+                
+                if start_minutes <= current_minutes < end_minutes:
+                    is_power_on = False
+                    next_change_time = outage["end"]
+                    break
+            
+            if is_power_on:
+                for outage in outages:
+                    start_h, start_m = map(int, outage["start"].split(":"))
+                    start_minutes = start_h * 60 + start_m
+                    if start_minutes > current_minutes:
+                        next_change_time = outage["start"]
+                        break
+            
+            # Форматувати текст відключень
+            if outages:
+                outage_text = ""
+                for outage in outages:
+                    outage_text += f"   🔴 <b>{outage['start']} - {outage['end']}</b>\n"
+            else:
+                outage_text = "   🟢 <b>Відключень не заплановано</b>\n"
+            
+            # Статус зараз
+            if is_power_on:
+                status_text = "🟢 <b>Зараз світло є</b>"
+                if next_change_time:
+                    status_text += f"\n   ⏱ Відключення о {next_change_time}"
+            else:
+                status_text = "🔴 <b>Зараз світла немає</b>"
+                if next_change_time:
+                    status_text += f"\n   ⏱ Увімкнення о {next_change_time}"
             
             sync_time = await api_service.get_sync_time()
             sync_info = f"\n🕐 Оновлено: {sync_time}" if sync_time else ""
@@ -270,14 +351,16 @@ class NotificationService:
                 f"⚡ <b>Графік погодинних відключень</b>\n\n"
                 f"📍 <b>Ваша адреса:</b>\n"
                 f"   {address['city_name']}, {address['street_name']}, {address['building_name']}\n\n"
-                f"🔌 <b>Ваша група ГПВ:</b> {formatted_group}\n"
+                f"🔌 <b>Ваша група ГПВ:</b> {formatted_group}\n\n"
+                f"{status_text}\n\n"
+                f"⏰ <b>Графік на сьогодні:</b>\n"
+                f"{outage_text}"
                 f"{sync_info}"
             )
             
-            await self.bot.send_photo(
+            await self.bot.send_message(
                 chat_id=user_id,
-                photo=full_image_url,
-                caption=message,
+                text=message,
                 parse_mode=ParseMode.HTML
             )
             

@@ -146,7 +146,7 @@ async def show_schedule(query, user_id: int):
         # Отримати поточний графік
         grafics = await api_service.get_current_grafics()
         
-        if not grafics or not grafics.get("imageUrl"):
+        if not grafics or not grafics.get("rawHtml"):
             await query.edit_message_text(
                 "⚠️ Наразі немає доступних графіків відключень.",
                 reply_markup=get_main_keyboard(True),
@@ -154,11 +154,60 @@ async def show_schedule(query, user_id: int):
             )
             return
         
-        image_url = grafics.get("imageUrl", "")
-        full_image_url = f"https://api.loe.lviv.ua{image_url}"
-        
+        raw_html = grafics.get("rawHtml", "")
         cherg_gpv = address.get("cherg_gpv", "")
         formatted_group = await api_service.get_schedule_group(cherg_gpv)
+        
+        # Парсити персоналізований графік
+        parsed_schedule = api_service.parse_schedule_for_group(raw_html, cherg_gpv)
+        outages = parsed_schedule.get("outages", [])
+        
+        # Визначити поточний статус
+        from datetime import datetime
+        now = datetime.now()
+        current_minutes = now.hour * 60 + now.minute
+        
+        is_power_on = True
+        next_change_time = None
+        
+        for outage in outages:
+            start_h, start_m = map(int, outage["start"].split(":"))
+            end_h, end_m = map(int, outage["end"].split(":"))
+            start_minutes = start_h * 60 + start_m
+            end_minutes = end_h * 60 + end_m
+            
+            if start_minutes <= current_minutes < end_minutes:
+                is_power_on = False
+                next_change_time = outage["end"]
+                break
+        
+        if is_power_on:
+            for outage in outages:
+                start_h, start_m = map(int, outage["start"].split(":"))
+                start_minutes = start_h * 60 + start_m
+                if start_minutes > current_minutes:
+                    next_change_time = outage["start"]
+                    break
+        
+        # Форматувати текст відключень
+        if outages:
+            outage_text = ""
+            for outage in outages:
+                outage_text += f"   🔴 <b>{outage['start']} - {outage['end']}</b>\n"
+        else:
+            outage_text = "   🟢 <b>Відключень не заплановано</b>\n"
+        
+        # Статус зараз
+        if is_power_on:
+            status_emoji = "🟢"
+            status_text = "Зараз світло є"
+            if next_change_time:
+                status_text += f" (відключення о {next_change_time})"
+        else:
+            status_emoji = "🔴"
+            status_text = "Зараз світла немає"
+            if next_change_time:
+                status_text += f" (увімкнення о {next_change_time})"
         
         sync_time = await api_service.get_sync_time()
         sync_info = f"\n🕐 Оновлено: {sync_time}" if sync_time else ""
@@ -167,27 +216,28 @@ async def show_schedule(query, user_id: int):
             f"⚡ <b>Графік погодинних відключень</b>\n\n"
             f"📍 <b>Ваша адреса:</b>\n"
             f"   {address['city_name']}, {address['street_name']}, {address['building_name']}\n\n"
-            f"🔌 <b>Ваша група ГПВ:</b> {formatted_group}\n"
+            f"🔌 <b>Ваша група ГПВ:</b> {formatted_group}\n\n"
+            f"{status_emoji} <b>{status_text}</b>\n\n"
+            f"⏰ <b>Графік на сьогодні:</b>\n"
+            f"{outage_text}"
             f"{sync_info}"
         )
-        
-        # Видалити старе повідомлення і відправити нове з фото
-        await query.message.delete()
         
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Оновити", callback_data="show_schedule")],
             [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
         ])
         
-        await query.message.chat.send_photo(
-            photo=full_image_url,
-            caption=message,
+        await query.edit_message_text(
+            message,
             reply_markup=keyboard,
             parse_mode=ParseMode.HTML
         )
         
     except Exception as e:
         print(f"Error showing schedule: {e}")
+        import traceback
+        traceback.print_exc()
         await query.edit_message_text(
             "❌ Помилка при отриманні графіку. Спробуйте пізніше.",
             reply_markup=get_main_keyboard(True),

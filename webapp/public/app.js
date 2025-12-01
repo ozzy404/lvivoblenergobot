@@ -25,7 +25,10 @@ const state = {
         street: null,
         building: null
     },
-    savedAddress: null
+    savedAddress: null,
+    currentSchedule: null,
+    tomorrowSchedule: null,
+    currentPowerStatus: null
 };
 
 // DOM Elements
@@ -36,10 +39,22 @@ const elements = {
     
     savedAddressText: document.getElementById('saved-address-text'),
     savedGroupText: document.getElementById('saved-group-text'),
-    hintGroup: document.getElementById('hint-group'),
     changeAddressBtn: document.getElementById('change-address-btn'),
     
-    scheduleImage: document.getElementById('schedule-image'),
+    // Power Status elements
+    powerStatusSection: document.getElementById('power-status-section'),
+    powerStatusCard: document.getElementById('power-status-card'),
+    powerStatusIndicator: document.getElementById('power-status-indicator'),
+    powerIcon: document.getElementById('power-icon'),
+    powerStatusText: document.getElementById('power-status-text'),
+    powerTimer: document.getElementById('power-timer'),
+    timerLabel: document.getElementById('timer-label'),
+    timerValue: document.getElementById('timer-value'),
+    scheduleInfo: document.getElementById('schedule-info'),
+    scheduleUpdateTime: document.getElementById('schedule-update-time'),
+    tomorrowSchedule: document.getElementById('tomorrow-schedule'),
+    tomorrowInfo: document.getElementById('tomorrow-info'),
+    
     scheduleLoading: document.getElementById('schedule-loading'),
     scheduleError: document.getElementById('schedule-error'),
     retryScheduleBtn: document.getElementById('retry-schedule-btn'),
@@ -114,52 +129,288 @@ async function fetchData(endpoint, useMainApi = false) {
 }
 
 async function loadScheduleImage() {
+    // Ця функція тепер завантажує текстові дані графіка замість картинки
+    await loadPowerSchedule();
+}
+
+// Timer interval reference
+let timerInterval = null;
+
+// Parse schedule text to extract outage times for a specific group
+function parseScheduleForGroup(rawHtml, groupNumber) {
+    // Decode HTML entities
+    const decoded = rawHtml
+        .replace(/\\u003C/g, '<')
+        .replace(/\\u003E/g, '>')
+        .replace(/\\\//g, '/')
+        .replace(/\\n/g, '\n');
+    
+    // Parse HTML
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(decoded, 'text/html');
+    
+    // Find schedule date
+    const boldElements = doc.querySelectorAll('b');
+    let scheduleDate = '';
+    let updateTime = '';
+    
+    for (const b of boldElements) {
+        const text = b.textContent;
+        if (text.includes('Графік погодинних відключень на')) {
+            const match = text.match(/(\d{2}\.\d{2}\.\d{4})/);
+            if (match) scheduleDate = match[1];
+        }
+        if (text.includes('Інформація станом на')) {
+            updateTime = text;
+        }
+    }
+    
+    // Format group number to match text format (e.g., "12" -> "6.2")
+    const formattedGroup = formatGroup(groupNumber);
+    
+    // Find the paragraph for this group
+    const paragraphs = doc.querySelectorAll('p');
+    let groupSchedule = null;
+    
+    for (const p of paragraphs) {
+        const text = p.textContent;
+        if (text.includes(`Група ${formattedGroup}.`)) {
+            groupSchedule = text;
+            break;
+        }
+    }
+    
+    // Parse outage times from the group schedule
+    const outages = [];
+    if (groupSchedule) {
+        // Check if power is on (no outages)
+        if (groupSchedule.includes('Електроенергія є')) {
+            // No outages for this group
+        } else {
+            // Parse time ranges like "з 09:00 до 12:30"
+            const timePattern = /з (\d{2}:\d{2}) до (\d{2}:\d{2})/g;
+            let match;
+            while ((match = timePattern.exec(groupSchedule)) !== null) {
+                outages.push({
+                    start: match[1],
+                    end: match[2]
+                });
+            }
+        }
+    }
+    
+    return {
+        date: scheduleDate,
+        updateTime: updateTime,
+        group: formattedGroup,
+        outages: outages,
+        rawText: groupSchedule || `Група ${formattedGroup}: дані відсутні`
+    };
+}
+
+// Get today's date in DD.MM.YYYY format
+function getTodayDate() {
+    const today = new Date();
+    const day = String(today.getDate()).padStart(2, '0');
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const year = today.getFullYear();
+    return `${day}.${month}.${year}`;
+}
+
+// Get tomorrow's date in DD.MM.YYYY format
+function getTomorrowDate() {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const day = String(tomorrow.getDate()).padStart(2, '0');
+    const month = String(tomorrow.getMonth() + 1).padStart(2, '0');
+    const year = tomorrow.getFullYear();
+    return `${day}.${month}.${year}`;
+}
+
+// Check if current time is within an outage period
+function getCurrentPowerStatus(outages) {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    
+    for (const outage of outages) {
+        const [startH, startM] = outage.start.split(':').map(Number);
+        const [endH, endM] = outage.end.split(':').map(Number);
+        const startMinutes = startH * 60 + startM;
+        const endMinutes = endH * 60 + endM;
+        
+        if (currentMinutes >= startMinutes && currentMinutes < endMinutes) {
+            return {
+                hasPower: false,
+                currentOutage: outage,
+                nextChange: outage.end,
+                nextChangeMinutes: endMinutes - currentMinutes
+            };
+        }
+    }
+    
+    // Find next outage
+    let nextOutage = null;
+    let minDiff = Infinity;
+    
+    for (const outage of outages) {
+        const [startH, startM] = outage.start.split(':').map(Number);
+        const startMinutes = startH * 60 + startM;
+        const diff = startMinutes - currentMinutes;
+        
+        if (diff > 0 && diff < minDiff) {
+            minDiff = diff;
+            nextOutage = outage;
+        }
+    }
+    
+    return {
+        hasPower: true,
+        nextOutage: nextOutage,
+        nextChange: nextOutage ? nextOutage.start : null,
+        nextChangeMinutes: nextOutage ? minDiff : null
+    };
+}
+
+// Format minutes to HH:MM
+function formatMinutesToTime(minutes) {
+    if (minutes === null) return '--:--';
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
+// Update timer display
+function updateTimer() {
+    if (!state.currentPowerStatus || !state.currentSchedule) return;
+    
+    const status = getCurrentPowerStatus(state.currentSchedule.outages);
+    state.currentPowerStatus = status;
+    
+    // Update UI
+    updatePowerStatusUI(status, state.currentSchedule);
+}
+
+// Update power status UI
+function updatePowerStatusUI(status, schedule) {
+    const card = elements.powerStatusCard;
+    
+    if (status.hasPower) {
+        card.className = 'power-status-card power-on';
+        elements.powerIcon.textContent = '💡';
+        elements.powerStatusText.textContent = 'Світло є';
+        elements.timerLabel.textContent = 'До відключення:';
+    } else {
+        card.className = 'power-status-card power-off';
+        elements.powerIcon.textContent = '🔌';
+        elements.powerStatusText.textContent = 'Світла немає';
+        elements.timerLabel.textContent = 'До увімкнення:';
+    }
+    
+    // Update timer
+    if (status.nextChangeMinutes !== null) {
+        elements.timerValue.textContent = formatMinutesToTime(status.nextChangeMinutes);
+    } else {
+        elements.timerValue.textContent = '∞';
+        elements.timerLabel.textContent = status.hasPower ? 'Відключень немає' : '';
+    }
+    
+    // Update schedule info
+    if (schedule.outages.length === 0) {
+        elements.scheduleInfo.innerHTML = '<span class="has-power">✅ На сьогодні відключень для вашої групи не заплановано</span>';
+    } else {
+        const timesHtml = schedule.outages.map(o => 
+            `<span class="outage-time">${o.start} - ${o.end}</span>`
+        ).join(' ');
+        elements.scheduleInfo.innerHTML = `<strong>Група ${schedule.group}:</strong> Відключення: ${timesHtml}`;
+    }
+    
+    elements.scheduleUpdateTime.textContent = schedule.updateTime || '';
+}
+
+// Main function to load power schedule
+async function loadPowerSchedule() {
+    if (!state.savedAddress || !state.savedAddress.cherg_gpv) {
+        console.error('No saved address or group');
+        return;
+    }
+    
     elements.scheduleLoading.style.display = 'block';
-    elements.scheduleImage.style.display = 'none';
     elements.scheduleError.style.display = 'none';
+    elements.powerStatusCard.style.display = 'none';
     
     try {
-        // Отримати графік з меню photo-grafic
         const menuData = await fetchData('/menus?page=1&type=photo-grafic', true);
         
-        let imageUrl = null;
-        if (Array.isArray(menuData) && menuData.length > 0) {
-            const menu = menuData[0];
-            // Структура: menu.menuItems - це масив елементів меню
-            // Шукаємо елемент "Today" (id=240 з orders=0) або беремо перший з imageUrl
-            if (menu.menuItems && Array.isArray(menu.menuItems)) {
-                // Спочатку шукаємо елемент Today (orders=0)
-                let todayItem = menu.menuItems.find(item => item.orders === 0 || item.name === 'Today');
-                if (todayItem && todayItem.imageUrl) {
-                    imageUrl = `https://api.loe.lviv.ua${todayItem.imageUrl}`;
-                } else {
-                    // Або беремо перший елемент з imageUrl
-                    for (const item of menu.menuItems) {
-                        if (item.imageUrl) {
-                            imageUrl = `https://api.loe.lviv.ua${item.imageUrl}`;
-                            break;
-                        }
-                    }
+        if (!Array.isArray(menuData) || menuData.length === 0) {
+            throw new Error('No menu data');
+        }
+        
+        const menu = menuData[0];
+        const menuItems = menu.menuItems || [];
+        
+        const todayDate = getTodayDate();
+        const tomorrowDate = getTomorrowDate();
+        
+        let todaySchedule = null;
+        let tomorrowSchedule = null;
+        
+        // Find today's and tomorrow's schedule
+        for (const item of menuItems) {
+            if (item.rawHtml) {
+                const decoded = item.rawHtml.replace(/\\u003C/g, '<').replace(/\\u003E/g, '>');
+                
+                if (decoded.includes(`на ${todayDate}`)) {
+                    todaySchedule = parseScheduleForGroup(item.rawHtml, state.savedAddress.cherg_gpv);
+                }
+                if (decoded.includes(`на ${tomorrowDate}`)) {
+                    tomorrowSchedule = parseScheduleForGroup(item.rawHtml, state.savedAddress.cherg_gpv);
                 }
             }
         }
         
-        if (imageUrl) {
-            elements.scheduleImage.src = imageUrl;
-            elements.scheduleImage.onload = () => {
-                elements.scheduleLoading.style.display = 'none';
-                elements.scheduleImage.style.display = 'block';
-            };
-            elements.scheduleImage.onerror = () => {
-                elements.scheduleLoading.style.display = 'none';
-                elements.scheduleError.style.display = 'block';
-            };
+        // If no today schedule found, try the first menu item with orders=0 (Today)
+        if (!todaySchedule) {
+            const todayItem = menuItems.find(item => item.orders === 0 || item.name === 'Today');
+            if (todayItem && todayItem.rawHtml) {
+                todaySchedule = parseScheduleForGroup(todayItem.rawHtml, state.savedAddress.cherg_gpv);
+            }
+        }
+        
+        elements.scheduleLoading.style.display = 'none';
+        
+        if (todaySchedule) {
+            state.currentSchedule = todaySchedule;
+            state.currentPowerStatus = getCurrentPowerStatus(todaySchedule.outages);
+            
+            elements.powerStatusCard.style.display = 'block';
+            updatePowerStatusUI(state.currentPowerStatus, todaySchedule);
+            
+            // Start timer
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(updateTimer, 60000); // Update every minute
         } else {
-            elements.scheduleLoading.style.display = 'none';
             elements.scheduleError.style.display = 'block';
         }
+        
+        // Show tomorrow's schedule if available
+        if (tomorrowSchedule) {
+            state.tomorrowSchedule = tomorrowSchedule;
+            elements.tomorrowSchedule.style.display = 'block';
+            
+            if (tomorrowSchedule.outages.length === 0) {
+                elements.tomorrowInfo.innerHTML = '<span class="has-power">✅ Відключень не заплановано</span>';
+            } else {
+                const timesHtml = tomorrowSchedule.outages.map(o => 
+                    `<span class="outage-time">${o.start} - ${o.end}</span>`
+                ).join(' ');
+                elements.tomorrowInfo.innerHTML = `Відключення: ${timesHtml}`;
+            }
+        } else {
+            elements.tomorrowSchedule.style.display = 'none';
+        }
+        
     } catch (e) {
-        console.error('Error loading schedule:', e);
+        console.error('Error loading power schedule:', e);
         elements.scheduleLoading.style.display = 'none';
         elements.scheduleError.style.display = 'block';
     }
@@ -260,10 +511,9 @@ function displaySavedAddress(addr) {
     elements.savedAddressText.textContent = `${addr.city_name}, ${addr.street_name}, ${addr.building_name}`;
     const group = formatGroup(addr.cherg_gpv);
     elements.savedGroupText.textContent = group;
-    elements.hintGroup.textContent = group;
     
     showSavedView();
-    loadScheduleImage();
+    loadPowerSchedule();
 }
 
 function formatGroup(gpv) {
@@ -525,7 +775,7 @@ function setupEventListeners() {
     
     // Retry schedule button
     elements.retryScheduleBtn.addEventListener('click', () => {
-        loadScheduleImage();
+        loadPowerSchedule();
     });
     
     // City search

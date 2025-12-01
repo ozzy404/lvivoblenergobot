@@ -506,3 +506,148 @@ body {
     cursor: pointer;
     font-size: 0.95rem;
 }
+
+/* Power Status Section */
+.power-status-section {
+    margin: 15px;
+}
+
+.power-status-card {
+    background: var(--bg-secondary);
+    border-radius: var(--border-radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+    margin-bottom: 15px;
+}
+
+.power-status-card.power-on {
+    border: 2px solid var(--success-color);
+    background: linear-gradient(135deg, rgba(0, 184, 148, 0.1), transparent);
+}
+
+.power-status-card.power-off {
+    border: 2px solid var(--error-color);
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.1), transparent);
+}
+
+.power-status-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.power-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.power-icon {
+    font-size: 2rem;
+}
+
+.power-status-text {
+    font-size: 1.3rem;
+    font-weight: bold;
+}
+
+.power-on .power-status-text {
+    color: var(--success-color);
+}
+
+.power-off .power-status-text {
+    color: var(--error-color);
+}
+
+.power-timer {
+    text-align: right;
+}
+
+.timer-label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 2px;
+}
+
+.timer-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+}
+
+.power-on .timer-value {
+    color: var(--warning-color);
+}
+
+.power-off .timer-value {
+    color: var(--success-color);
+}
+
+.power-schedule {
+    border-top: 1px solid rgba(255,255,255,0.1);
+    padding-top: 15px;
+}
+
+.schedule-info {
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+
+.schedule-info .outage-time {
+    display: inline-block;
+    background: rgba(231, 76, 60, 0.2);
+    color: #ff7675;
+    padding: 2px 8px;
+    border-radius: 5px;
+    margin: 2px 4px 2px 0;
+    font-weight: 500;
+}
+
+.schedule-info .has-power {
+    color: var(--success-color);
+}
+
+.schedule-update-time {
+    margin-top: 10px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    text-align: right;
+}
+
+/* Tomorrow Schedule */
+.tomorrow-schedule {
+    background: var(--bg-secondary);
+    border-radius: var(--border-radius);
+    padding: 15px;
+    box-shadow: var(--shadow);
+    margin-bottom: 15px;
+}
+
+.tomorrow-schedule h3 {
+    margin-bottom: 10px;
+    font-size: 1rem;
+    color: var(--text-secondary);
+}
+
+.tomorrow-info {
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+
+.tomorrow-info .outage-time {
+    display: inline-block;
+    background: rgba(253, 203, 110, 0.2);
+    color: var(--warning-color);
+    padding: 2px 8px;
+    border-radius: 5px;
+    margin: 2px 4px 2px 0;
+    font-weight: 500;
+}
+
+.schedule-loading {
+    padding: 40px;
+    text-align: center;
+}
+

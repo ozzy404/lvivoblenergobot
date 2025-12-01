@@ -38,19 +38,38 @@
                     </div>
                 </div>
                 
-                <div class="schedule-section">
-                    <h2>📊 Графік відключень</h2>
-                    <p class="schedule-hint">Знайдіть вашу групу <strong id="hint-group"></strong> на графіку</p>
-                    <div class="schedule-image-container">
-                        <img id="schedule-image" class="schedule-image" src="" alt="Графік відключень">
-                        <div id="schedule-loading" class="schedule-loading">
-                            <div class="spinner"></div>
-                            <p>Завантаження графіку...</p>
+                <!-- Power Status Section -->
+                <div class="power-status-section" id="power-status-section">
+                    <div class="power-status-card" id="power-status-card">
+                        <div class="power-status-header">
+                            <div class="power-status-indicator" id="power-status-indicator">
+                                <span class="power-icon" id="power-icon">💡</span>
+                                <span class="power-status-text" id="power-status-text">Завантаження...</span>
+                            </div>
+                            <div class="power-timer" id="power-timer">
+                                <span class="timer-label" id="timer-label">До зміни:</span>
+                                <span class="timer-value" id="timer-value">--:--</span>
+                            </div>
                         </div>
-                        <div id="schedule-error" class="schedule-error">
-                            <p>Не вдалося завантажити графік</p>
-                            <button class="retry-schedule-btn" id="retry-schedule-btn">🔄 Спробувати ще</button>
+                        <div class="power-schedule" id="power-schedule">
+                            <div class="schedule-info" id="schedule-info"></div>
+                            <div class="schedule-update-time" id="schedule-update-time"></div>
                         </div>
+                    </div>
+                    
+                    <!-- Tomorrow's Schedule -->
+                    <div class="tomorrow-schedule" id="tomorrow-schedule" style="display: none;">
+                        <h3>📅 Графік на завтра</h3>
+                        <div class="tomorrow-info" id="tomorrow-info"></div>
+                    </div>
+                    
+                    <div id="schedule-loading" class="schedule-loading">
+                        <div class="spinner"></div>
+                        <p>Завантаження графіку...</p>
+                    </div>
+                    <div id="schedule-error" class="schedule-error" style="display: none;">
+                        <p>Не вдалося завантажити графік</p>
+                        <button class="retry-schedule-btn" id="retry-schedule-btn">🔄 Спробувати ще</button>
                     </div>
                 </div>
             </div>
