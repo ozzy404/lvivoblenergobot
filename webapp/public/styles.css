@@ -373,3 +373,136 @@ body {
     padding: 10px;
     opacity: 0.5;
 }
+
+/* ============ SAVED VIEW ============ */
+#saved-view {
+    display: none;
+}
+
+#select-view {
+    display: none;
+}
+
+#footer-select {
+    display: none;
+}
+
+.saved-address-card {
+    background: var(--bg-secondary);
+    border-radius: var(--border-radius);
+    padding: 20px;
+    margin: 15px;
+    box-shadow: var(--shadow);
+}
+
+.saved-address-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 15px;
+}
+
+.saved-address-info h3 {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 5px;
+}
+
+.saved-address-info p {
+    font-size: 1.05rem;
+    font-weight: 500;
+}
+
+.change-btn {
+    background: transparent;
+    border: 1px solid var(--accent-color);
+    color: var(--accent-color);
+    padding: 8px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.3s;
+}
+
+.change-btn:hover {
+    background: var(--accent-color);
+    color: white;
+}
+
+.saved-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-top: 15px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+}
+
+.saved-group-label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.group-badge {
+    background: linear-gradient(135deg, var(--accent-color), #a29bfe);
+    padding: 5px 15px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+/* Schedule Section */
+.schedule-section {
+    margin: 15px;
+}
+
+.schedule-section h2 {
+    text-align: center;
+    margin-bottom: 5px;
+    font-size: 1.2rem;
+}
+
+.schedule-hint {
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-bottom: 15px;
+}
+
+.schedule-image-container {
+    background: var(--bg-secondary);
+    border-radius: var(--border-radius);
+    padding: 10px;
+    box-shadow: var(--shadow);
+    text-align: center;
+}
+
+.schedule-image {
+    max-width: 100%;
+    border-radius: 8px;
+    display: none;
+}
+
+.schedule-loading {
+    padding: 40px;
+    display: block;
+}
+
+.schedule-error {
+    padding: 30px;
+    color: var(--text-secondary);
+    display: none;
+}
+
+.schedule-error p {
+    margin-bottom: 15px;
+}
+
+.retry-schedule-btn {
+    background: var(--accent-color);
+    color: white;
+    border: none;
+    padding: 10px 25px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.95rem;
+}

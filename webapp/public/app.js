@@ -3,15 +3,19 @@ const tg = window.Telegram.WebApp;
 tg.expand();
 try { tg.enableClosingConfirmation(); } catch(e) {}
 
-// API Configuration - use CORS proxy
-const API_BASE = 'https://power-api.loe.lviv.ua/api';
-const CORS_PROXY = 'https://corsproxy.io/?';
-
 // Version
-const VERSION = 'v1.6';
+const VERSION = 'v2.0';
 console.log('LOE WebApp ' + VERSION);
 
-// State management
+// API Configuration
+const API_BASE = 'https://power-api.loe.lviv.ua/api';
+const MAIN_API_BASE = 'https://api.loe.lviv.ua/api';
+const CORS_PROXY = 'https://corsproxy.io/?';
+
+// Storage key
+const STORAGE_KEY = 'loe_saved_address';
+
+// State
 const state = {
     cities: [],
     streets: [],
@@ -21,11 +25,25 @@ const state = {
         street: null,
         building: null
     },
-    loading: false
+    savedAddress: null
 };
 
 // DOM Elements
 const elements = {
+    savedView: document.getElementById('saved-view'),
+    selectView: document.getElementById('select-view'),
+    footerSelect: document.getElementById('footer-select'),
+    
+    savedAddressText: document.getElementById('saved-address-text'),
+    savedGroupText: document.getElementById('saved-group-text'),
+    hintGroup: document.getElementById('hint-group'),
+    changeAddressBtn: document.getElementById('change-address-btn'),
+    
+    scheduleImage: document.getElementById('schedule-image'),
+    scheduleLoading: document.getElementById('schedule-loading'),
+    scheduleError: document.getElementById('schedule-error'),
+    retryScheduleBtn: document.getElementById('retry-schedule-btn'),
+    
     citySearch: document.getElementById('city-search'),
     cityDropdown: document.getElementById('city-dropdown'),
     citySelected: document.getElementById('city-selected'),
@@ -55,18 +73,39 @@ const elements = {
     errorMessage: document.getElementById('error-message')
 };
 
-// API Functions
-async function fetchData(endpoint) {
-    const url = `${API_BASE}${endpoint}`;
-    // Try direct first, then proxy
+// ============ STORAGE ============
+function saveAddress(data) {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        return true;
+    } catch(e) {
+        console.error('Cannot save to localStorage:', e);
+        return false;
+    }
+}
+
+function loadSavedAddress() {
+    try {
+        const data = localStorage.getItem(STORAGE_KEY);
+        return data ? JSON.parse(data) : null;
+    } catch(e) {
+        console.error('Cannot load from localStorage:', e);
+        return null;
+    }
+}
+
+// ============ API ============
+async function fetchData(endpoint, useMainApi = false) {
+    const base = useMainApi ? MAIN_API_BASE : API_BASE;
+    const url = `${base}${endpoint}`;
+    
     try {
         const response = await fetch(url);
         if (!response.ok) throw new Error('Network error');
         const data = await response.json();
         return data['hydra:member'] || data.member || data;
     } catch (e) {
-        // Use CORS proxy as fallback
-        console.log('Using CORS proxy...');
+        console.log('Using CORS proxy for:', endpoint);
         const proxyResponse = await fetch(CORS_PROXY + encodeURIComponent(url));
         if (!proxyResponse.ok) throw new Error('Proxy error');
         const data = await proxyResponse.json();
@@ -74,7 +113,50 @@ async function fetchData(endpoint) {
     }
 }
 
-// Load all cities on start
+async function loadScheduleImage() {
+    elements.scheduleLoading.style.display = 'block';
+    elements.scheduleImage.style.display = 'none';
+    elements.scheduleError.style.display = 'none';
+    
+    try {
+        const data = await fetchData('/pages?synonym=power-top', true);
+        
+        let imageUrl = null;
+        if (Array.isArray(data) && data.length > 0) {
+            const page = data[0];
+            if (page.image) {
+                imageUrl = `https://api.loe.lviv.ua${page.image}`;
+            }
+        }
+        
+        if (!imageUrl) {
+            const grafics = await fetchData('/pages?synonym=grafics', true);
+            if (Array.isArray(grafics) && grafics.length > 0 && grafics[0].image) {
+                imageUrl = `https://api.loe.lviv.ua${grafics[0].image}`;
+            }
+        }
+        
+        if (imageUrl) {
+            elements.scheduleImage.src = imageUrl;
+            elements.scheduleImage.onload = () => {
+                elements.scheduleLoading.style.display = 'none';
+                elements.scheduleImage.style.display = 'block';
+            };
+            elements.scheduleImage.onerror = () => {
+                elements.scheduleLoading.style.display = 'none';
+                elements.scheduleError.style.display = 'block';
+            };
+        } else {
+            elements.scheduleLoading.style.display = 'none';
+            elements.scheduleError.style.display = 'block';
+        }
+    } catch (e) {
+        console.error('Error loading schedule:', e);
+        elements.scheduleLoading.style.display = 'none';
+        elements.scheduleError.style.display = 'block';
+    }
+}
+
 async function loadCities() {
     showLoading();
     try {
@@ -86,7 +168,6 @@ async function loadCities() {
     }
 }
 
-// Load streets for selected city
 async function loadStreets(cityId) {
     showLoading();
     try {
@@ -99,7 +180,6 @@ async function loadStreets(cityId) {
     }
 }
 
-// Load buildings for selected city and street
 async function loadBuildings(cityId, streetId) {
     showLoading();
     try {
@@ -112,7 +192,43 @@ async function loadBuildings(cityId, streetId) {
     }
 }
 
-// Filter and render dropdown items
+// ============ UI ============
+function showSavedView() {
+    elements.savedView.style.display = 'block';
+    elements.selectView.style.display = 'none';
+    elements.footerSelect.style.display = 'none';
+}
+
+function showSelectView() {
+    elements.savedView.style.display = 'none';
+    elements.selectView.style.display = 'block';
+    elements.footerSelect.style.display = 'block';
+    
+    if (state.cities.length === 0) {
+        loadCities();
+    }
+}
+
+function displaySavedAddress(addr) {
+    elements.savedAddressText.textContent = `${addr.city_name}, ${addr.street_name}, ${addr.building_name}`;
+    const group = formatGroup(addr.cherg_gpv);
+    elements.savedGroupText.textContent = group;
+    elements.hintGroup.textContent = group;
+    
+    showSavedView();
+    loadScheduleImage();
+}
+
+function formatGroup(gpv) {
+    if (!gpv) return 'Невідома';
+    const str = String(gpv);
+    if (str.length === 2) {
+        return `${str[0]}.${str[1]}`;
+    }
+    return str;
+}
+
+// ============ DROPDOWN ============
 function filterItems(items, searchTerm, type) {
     if (!searchTerm || searchTerm.length < 1) {
         return [];
@@ -125,7 +241,6 @@ function filterItems(items, searchTerm, type) {
         filtered = items.filter(item => 
             item.name.toLowerCase().startsWith(term)
         );
-        // Also include items that contain the term but don't start with it
         const containsItems = items.filter(item => 
             !item.name.toLowerCase().startsWith(term) && 
             item.name.toLowerCase().includes(term)
@@ -138,14 +253,13 @@ function filterItems(items, searchTerm, type) {
             return name.includes(term) || fullName.includes(term);
         });
     } else {
-        // Buildings use buildingName field
         filtered = items.filter(item => {
             const bName = (item.buildingName || item.name || '').toLowerCase();
             return bName.includes(term);
         });
     }
     
-    return filtered.slice(0, 20); // Limit to 20 results
+    return filtered.slice(0, 20);
 }
 
 function renderDropdown(dropdown, items, type) {
@@ -166,7 +280,6 @@ function renderDropdown(dropdown, items, type) {
                 : item.name;
             info = '';
         } else {
-            // Buildings use buildingName field
             name = item.buildingName || item.name || '';
             const gpv = item.chergGpv || '';
             info = gpv ? `Черга: ${formatGroup(gpv)}` : '';
@@ -182,7 +295,6 @@ function renderDropdown(dropdown, items, type) {
     
     dropdown.classList.add('active');
     
-    // Add click handlers
     dropdown.querySelectorAll('.dropdown-item').forEach(el => {
         el.addEventListener('click', () => {
             const id = parseInt(el.dataset.id);
@@ -205,7 +317,6 @@ function selectItem(type, item) {
             ? `${item.streetType.shortName} ${item.name}` 
             : item.name;
     } else {
-        // Buildings use buildingName field
         displayName = item.buildingName || item.name || '';
     }
     
@@ -216,10 +327,8 @@ function selectItem(type, item) {
     
     state.selected[type] = item;
     
-    // Haptic feedback
     try { tg.HapticFeedback.selectionChanged(); } catch(e) {}
     
-    // Handle next step
     if (type === 'city') {
         resetStep('street');
         resetStep('building');
@@ -235,7 +344,7 @@ function selectItem(type, item) {
     }
 }
 
-// Step management
+// ============ STEP MANAGEMENT ============
 function enableStep(step) {
     const stepEl = elements[`step${step.charAt(0).toUpperCase() + step.slice(1)}`];
     const searchInput = elements[`${step}Search`];
@@ -264,7 +373,7 @@ function resetStep(step) {
     }
 }
 
-// Result display
+// ============ RESULT ============
 function showResult() {
     const city = state.selected.city;
     const street = state.selected.street;
@@ -287,7 +396,6 @@ function hideResult() {
     elements.result.style.display = 'none';
 }
 
-// Submit button
 function enableSubmit() {
     elements.submitBtn.disabled = false;
 }
@@ -296,7 +404,6 @@ function disableSubmit() {
     elements.submitBtn.disabled = true;
 }
 
-// Loading and error
 function showLoading() {
     elements.loading.style.display = 'block';
     elements.error.style.display = 'none';
@@ -312,7 +419,6 @@ function showError(message) {
     elements.errorMessage.textContent = message;
 }
 
-// Utility
 function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
@@ -320,16 +426,7 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function formatGroup(gpv) {
-    if (!gpv) return '';
-    const str = String(gpv);
-    if (str.length === 2) {
-        return `${str[0]}.${str[1]}`;
-    }
-    return str;
-}
-
-// Submit to Telegram
+// ============ SUBMIT ============
 function submitSelection() {
     const building = state.selected.building;
     if (!building) return;
@@ -348,12 +445,34 @@ function submitSelection() {
         cherg_gpv: building.chergGpv || ''
     };
     
-    try { tg.HapticFeedback.notificationOccurred('success'); } catch(e) {}
-    tg.sendData(JSON.stringify(data));
+    // Save locally
+    saveAddress(data);
+    state.savedAddress = data;
+    
+    // Send to Telegram bot
+    try { 
+        tg.HapticFeedback.notificationOccurred('success'); 
+        tg.sendData(JSON.stringify(data));
+    } catch(e) {
+        console.log('Not in Telegram WebApp context');
+    }
+    
+    // Show saved view with schedule
+    displaySavedAddress(data);
 }
 
-// Event listeners
+// ============ EVENT LISTENERS ============
 function setupEventListeners() {
+    // Change address button
+    elements.changeAddressBtn.addEventListener('click', () => {
+        showSelectView();
+    });
+    
+    // Retry schedule button
+    elements.retryScheduleBtn.addEventListener('click', () => {
+        loadScheduleImage();
+    });
+    
     // City search
     elements.citySearch.addEventListener('input', (e) => {
         const term = e.target.value.trim();
@@ -450,13 +569,16 @@ function setupEventListeners() {
     // Submit button
     elements.submitBtn.addEventListener('click', submitSelection);
     
-    // Retry button
-    document.querySelector('.retry-btn').addEventListener('click', () => {
-        location.reload();
-    });
+    // Retry button for loading errors
+    const retryBtn = document.querySelector('.retry-btn');
+    if (retryBtn) {
+        retryBtn.addEventListener('click', () => {
+            location.reload();
+        });
+    }
 }
 
-// Initialize
+// ============ INIT ============
 document.addEventListener('DOMContentLoaded', () => {
     tg.ready();
     
@@ -470,5 +592,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     setupEventListeners();
-    loadCities();
+    
+    // Check for saved address
+    const saved = loadSavedAddress();
+    if (saved && saved.city_name && saved.cherg_gpv) {
+        state.savedAddress = saved;
+        displaySavedAddress(saved);
+    } else {
+        showSelectView();
+    }
 });
