@@ -193,13 +193,22 @@ async function loadBuildings(cityId, streetId) {
 }
 
 // ============ UI ============
+function hideInitialLoading() {
+    const initialLoading = document.getElementById('initial-loading');
+    if (initialLoading) {
+        initialLoading.style.display = 'none';
+    }
+}
+
 function showSavedView() {
+    hideInitialLoading();
     elements.savedView.style.display = 'block';
     elements.selectView.style.display = 'none';
     elements.footerSelect.style.display = 'none';
 }
 
 function showSelectView() {
+    hideInitialLoading();
     elements.savedView.style.display = 'none';
     elements.selectView.style.display = 'block';
     elements.footerSelect.style.display = 'block';

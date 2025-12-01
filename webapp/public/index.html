@@ -16,8 +16,14 @@
         </div>
         
         <div class="container">
-            <!-- Saved Address View -->
-            <div id="saved-view">
+            <!-- Initial Loading -->
+            <div id="initial-loading" class="loading" style="display: block; padding: 40px 0;">
+                <div class="spinner"></div>
+                <p>Завантаження...</p>
+            </div>
+            
+            <!-- Saved Address View (hidden by default) -->
+            <div id="saved-view" style="display: none;">
                 <div class="saved-address-card">
                     <div class="saved-address-header">
                         <div class="saved-address-info">
@@ -49,8 +55,8 @@
                 </div>
             </div>
             
-            <!-- Address Selection View -->
-            <div id="select-view">
+            <!-- Address Selection View (hidden by default) -->
+            <div id="select-view" style="display: none;">
                 <div class="step" id="step-city">
                     <div class="form-group">
                         <label for="city-search">🏙️ Населений пункт</label>
@@ -116,7 +122,7 @@
             </div>
         </div>
         
-        <div class="footer" id="footer-select">
+        <div class="footer" id="footer-select" style="display: none;">
             <button class="submit-btn" id="submit-btn" disabled>
                 ✅ Зберегти адресу
             </button>
