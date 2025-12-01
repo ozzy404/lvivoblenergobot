@@ -1,0 +1,28 @@
+.
+├── INSTALLATION.md
+├── README.md
+├── README_FULL.md
+├── SUMMARY.md
+├── bot
+│   ├── api_service.py
+│   ├── config.py
+│   ├── database.py
+│   ├── handlers.py
+│   ├── main.py
+│   ├── notifications.py
+│   └── requirements.txt
+├── lvivoblenergo.txt
+├── poweron.loe.lviv.ua.har
+├── project_structure.txt
+└── webapp
+    ├── firebase-debug.log
+    ├── firebase.json
+    └── public
+        ├── app.js
+        ├── app_new.js
+        ├── index.html
+        ├── index_new.html
+        ├── styles.css
+        └── styles_new.css
+
+4 directories, 22 files

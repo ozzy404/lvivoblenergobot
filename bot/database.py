@@ -53,9 +53,34 @@ class Database:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS schedule_cache (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    schedule_date TEXT NOT NULL,
                     image_url TEXT,
                     raw_html TEXT,
                     last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Таблиця для збереження історії графіків
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS schedule_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    schedule_date TEXT NOT NULL,
+                    image_url TEXT,
+                    raw_html TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(schedule_date, image_url)
+                )
+            """)
+            
+            # Таблиця для відстеження відправлених сповіщень
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS sent_notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    notification_type TEXT NOT NULL,
+                    schedule_date TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
             """)
             
@@ -202,18 +227,67 @@ class Database:
                 row = await cursor.fetchone()
                 return row[0] if row else None
     
-    async def save_schedule_hash(self, image_url: str, raw_html: str = None) -> bool:
+    async def save_schedule_hash(self, schedule_date: str, image_url: str, raw_html: str = None) -> bool:
         """Зберегти хеш нового графіку"""
         async with aiosqlite.connect(self.db_path) as db:
             try:
+                # Перевірити чи вже існує такий графік
+                async with db.execute("""
+                    SELECT id FROM schedule_cache
+                    WHERE schedule_date = ? AND image_url = ?
+                """, (schedule_date, image_url)) as cursor:
+                    existing = await cursor.fetchone()
+                
+                if not existing:
+                    await db.execute("""
+                        INSERT INTO schedule_cache (schedule_date, image_url, raw_html)
+                        VALUES (?, ?, ?)
+                    """, (schedule_date, image_url, raw_html))
+                    
+                    # Також зберегти в історію
+                    await db.execute("""
+                        INSERT OR IGNORE INTO schedule_history (schedule_date, image_url, raw_html)
+                        VALUES (?, ?, ?)
+                    """, (schedule_date, image_url, raw_html))
+                    
+                    await db.commit()
+                    return True
+                return False
+            except Exception as e:
+                print(f"Error saving schedule hash: {e}")
+                return False
+    
+    async def check_notification_sent(self, user_id: int, notification_type: str, schedule_date: str = None) -> bool:
+        """Перевірити чи було відправлено сповіщення користувачу"""
+        async with aiosqlite.connect(self.db_path) as db:
+            query = """
+                SELECT id FROM sent_notifications 
+                WHERE user_id = ? AND notification_type = ?
+            """
+            params = [user_id, notification_type]
+            
+            if schedule_date:
+                query += " AND schedule_date = ?"
+                params.append(schedule_date)
+            
+            query += " AND created_at >= date('now')"
+            
+            async with db.execute(query, tuple(params)) as cursor:
+                row = await cursor.fetchone()
+                return row is not None
+    
+    async def mark_notification_sent(self, user_id: int, notification_type: str, schedule_date: str = None) -> bool:
+        """Позначити що сповіщення було відправлено"""
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
                 await db.execute("""
-                    INSERT INTO schedule_cache (image_url, raw_html)
-                    VALUES (?, ?)
-                """, (image_url, raw_html))
+                    INSERT INTO sent_notifications (user_id, notification_type, schedule_date)
+                    VALUES (?, ?, ?)
+                """, (user_id, notification_type, schedule_date))
                 await db.commit()
                 return True
             except Exception as e:
-                print(f"Error saving schedule hash: {e}")
+                print(f"Error marking notification sent: {e}")
                 return False
 
 

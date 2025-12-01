@@ -120,6 +120,82 @@ class LoeApiService:
                 "disconnectionTask": account.get("disconnectionTask", False)
             }
         return None
+    
+    async def get_schedule_image_for_today(self) -> Optional[Dict]:
+        """Отримати посилання на зображення графіку на сьогодні"""
+        grafics = await self.get_current_grafics()
+        if grafics and grafics.get("imageUrl"):
+            return {
+                "image_url": f"https://api.loe.lviv.ua{grafics['imageUrl']}",
+                "date": grafics.get("date", ""),
+                "title": grafics.get("title", "")
+            }
+        return None
+    
+    async def get_schedule_image_for_tomorrow(self) -> Optional[Dict]:
+        """Отримати посилання на зображення графіку на завтра"""
+        url = f"{self.main_api_base}/pages?page=1&synonym=power-tomorrow"
+        data = await self._make_request(url)
+        if data and "hydra:member" in data and len(data["hydra:member"]) > 0:
+            page = data["hydra:member"][0]
+            if page.get("imageUrl"):
+                return {
+                    "image_url": f"https://api.loe.lviv.ua{page['imageUrl']}",
+                    "date": page.get("date", ""),
+                    "title": page.get("title", "")
+                }
+        return None
+    
+    async def get_current_power_status(self, cherg_gpv: str) -> Optional[Dict]:
+        """Визначити поточний статус електропостачання для групи
+        Returns: {
+            'is_power_on': bool,
+            'next_change_time': str,  # час наступної зміни
+            'schedule_intervals': list  # інтервали відключень на сьогодні
+        }
+        """
+        from datetime import datetime
+        
+        # Отримати GPV групи з деталями
+        gpv_groups = await self.get_gpv_groups()
+        
+        if not cherg_gpv or cherg_gpv == "0":
+            return None
+        
+        # Знайти групу користувача
+        group_number = ".".join(cherg_gpv)
+        target_group = None
+        
+        for group in gpv_groups:
+            if group.get("name") == group_number:
+                target_group = group
+                break
+        
+        if not target_group:
+            return None
+        
+        # Парсинг розкладу з опису групи
+        # Формат: "Відключення: 08:00-11:00, 16:00-19:00"
+        description = target_group.get("description", "")
+        current_hour = datetime.now().hour
+        current_minute = datetime.now().minute
+        current_time_minutes = current_hour * 60 + current_minute
+        
+        # Простий парсинг інтервалів (можна розширити)
+        intervals = []
+        is_power_on = True
+        next_change_time = None
+        
+        # Це спрощена логіка - потрібно парсити реальні дані з API
+        # TODO: Реалізувати повний парсинг графіків з зображення або API
+        
+        return {
+            "is_power_on": is_power_on,
+            "next_change_time": next_change_time,
+            "schedule_intervals": intervals,
+            "group_name": group_number,
+            "description": description
+        }
 
 
 # Singleton instance
