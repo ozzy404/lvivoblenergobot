@@ -572,9 +572,11 @@ body {
 }
 
 .timer-value {
-    font-size: 1.5rem;
+    font-size: 1.4rem;
     font-weight: bold;
     font-family: 'Courier New', monospace;
+    min-width: 100px;
+    display: inline-block;
 }
 
 .power-on .timer-value {

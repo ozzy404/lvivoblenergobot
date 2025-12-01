@@ -4,13 +4,17 @@ tg.expand();
 try { tg.enableClosingConfirmation(); } catch(e) {}
 
 // Version
-const VERSION = 'v2.0';
+const VERSION = 'v2.1';
 console.log('LOE WebApp ' + VERSION);
 
-// API Configuration
+// API Configuration - завжди використовуємо CORS proxy для швидкості
 const API_BASE = 'https://power-api.loe.lviv.ua/api';
 const MAIN_API_BASE = 'https://api.loe.lviv.ua/api';
 const CORS_PROXY = 'https://corsproxy.io/?';
+
+// Cache for API responses
+const apiCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 хвилин
 
 // Storage key
 const STORAGE_KEY = 'loe_saved_address';
@@ -113,19 +117,25 @@ function loadSavedAddress() {
 async function fetchData(endpoint, useMainApi = false) {
     const base = useMainApi ? MAIN_API_BASE : API_BASE;
     const url = `${base}${endpoint}`;
+    const cacheKey = url;
     
-    try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error('Network error');
-        const data = await response.json();
-        return data['hydra:member'] || data.member || data;
-    } catch (e) {
-        console.log('Using CORS proxy for:', endpoint);
-        const proxyResponse = await fetch(CORS_PROXY + encodeURIComponent(url));
-        if (!proxyResponse.ok) throw new Error('Proxy error');
-        const data = await proxyResponse.json();
-        return data['hydra:member'] || data.member || data;
+    // Перевірити кеш
+    const cached = apiCache.get(cacheKey);
+    if (cached && Date.now() - cached.time < CACHE_TTL) {
+        return cached.data;
     }
+    
+    // Завжди використовуємо CORS proxy для швидкості (без спроби прямого запиту)
+    const proxyUrl = CORS_PROXY + encodeURIComponent(url);
+    const response = await fetch(proxyUrl);
+    if (!response.ok) throw new Error('API error');
+    const data = await response.json();
+    const result = data['hydra:member'] || data.member || data;
+    
+    // Зберегти в кеш
+    apiCache.set(cacheKey, { data: result, time: Date.now() });
+    
+    return result;
 }
 
 async function loadScheduleImage() {
@@ -230,20 +240,20 @@ function getTomorrowDate() {
 // Check if current time is within an outage period
 function getCurrentPowerStatus(outages) {
     const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
     
     for (const outage of outages) {
         const [startH, startM] = outage.start.split(':').map(Number);
         const [endH, endM] = outage.end.split(':').map(Number);
-        const startMinutes = startH * 60 + startM;
-        const endMinutes = endH * 60 + endM;
+        const startSeconds = startH * 3600 + startM * 60;
+        const endSeconds = endH * 3600 + endM * 60;
         
-        if (currentMinutes >= startMinutes && currentMinutes < endMinutes) {
+        if (currentSeconds >= startSeconds && currentSeconds < endSeconds) {
             return {
                 hasPower: false,
                 currentOutage: outage,
                 nextChange: outage.end,
-                nextChangeMinutes: endMinutes - currentMinutes
+                nextChangeSeconds: endSeconds - currentSeconds
             };
         }
     }
@@ -254,8 +264,8 @@ function getCurrentPowerStatus(outages) {
     
     for (const outage of outages) {
         const [startH, startM] = outage.start.split(':').map(Number);
-        const startMinutes = startH * 60 + startM;
-        const diff = startMinutes - currentMinutes;
+        const startSeconds = startH * 3600 + startM * 60;
+        const diff = startSeconds - currentSeconds;
         
         if (diff > 0 && diff < minDiff) {
             minDiff = diff;
@@ -267,24 +277,32 @@ function getCurrentPowerStatus(outages) {
         hasPower: true,
         nextOutage: nextOutage,
         nextChange: nextOutage ? nextOutage.start : null,
-        nextChangeMinutes: nextOutage ? minDiff : null
+        nextChangeSeconds: nextOutage ? minDiff : null
     };
 }
 
-// Format minutes to HH:MM
-function formatMinutesToTime(minutes) {
-    if (minutes === null) return '--:--';
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+// Format seconds to HH:MM:SS
+function formatSecondsToTime(totalSeconds) {
+    if (totalSeconds === null || totalSeconds === undefined) return '--:--:--';
+    const hours = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+    return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-// Update timer display
+// Update timer display - викликається кожну секунду
 function updateTimer() {
-    if (!state.currentPowerStatus || !state.currentSchedule) return;
+    if (!state.currentSchedule) return;
     
     const status = getCurrentPowerStatus(state.currentSchedule.outages);
+    const prevStatus = state.currentPowerStatus;
     state.currentPowerStatus = status;
+    
+    // Перевірка зміни статусу (перезавантажити дані)
+    if (prevStatus && prevStatus.hasPower !== status.hasPower) {
+        loadPowerSchedule();
+        return;
+    }
     
     // Update UI
     updatePowerStatusUI(status, state.currentSchedule);
@@ -306,9 +324,9 @@ function updatePowerStatusUI(status, schedule) {
         elements.timerLabel.textContent = 'До увімкнення:';
     }
     
-    // Update timer
-    if (status.nextChangeMinutes !== null) {
-        elements.timerValue.textContent = formatMinutesToTime(status.nextChangeMinutes);
+    // Update timer with seconds
+    if (status.nextChangeSeconds !== null && status.nextChangeSeconds !== undefined) {
+        elements.timerValue.textContent = formatSecondsToTime(status.nextChangeSeconds);
     } else {
         elements.timerValue.textContent = '∞';
         elements.timerLabel.textContent = status.hasPower ? 'Відключень немає' : '';
@@ -385,9 +403,9 @@ async function loadPowerSchedule() {
             elements.powerStatusCard.style.display = 'block';
             updatePowerStatusUI(state.currentPowerStatus, todaySchedule);
             
-            // Start timer
+            // Start timer - оновлення кожну секунду для realtime
             if (timerInterval) clearInterval(timerInterval);
-            timerInterval = setInterval(updateTimer, 60000); // Update every minute
+            timerInterval = setInterval(updateTimer, 1000); // Update every second
         } else {
             elements.scheduleError.style.display = 'block';
         }
@@ -417,13 +435,16 @@ async function loadPowerSchedule() {
 }
 
 async function loadCities() {
-    showLoading();
+    // Не показуємо loading якщо вже є міста (фонове завантаження)
+    const isBackground = state.cities.length > 0;
+    if (!isBackground) showLoading();
+    
     try {
         state.cities = await fetchData('/pw_cities?pagination=false');
-        hideLoading();
+        if (!isBackground) hideLoading();
         console.log(`Loaded ${state.cities.length} cities`);
     } catch (error) {
-        showError('Не вдалося завантажити населені пункти');
+        if (!isBackground) showError('Не вдалося завантажити населені пункти');
     }
 }
 
@@ -896,6 +917,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     setupEventListeners();
+    
+    // Почати завантаження міст паралельно (для швидкості)
+    loadCities().catch(() => {});
     
     // Check for saved address
     const saved = loadSavedAddress();

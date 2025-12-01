@@ -76,9 +76,11 @@ class LoeApiService:
     async def get_schedule_group(self, cherg_gpv: str) -> str:
         """Перетворити номер черги ГПВ у читабельний формат"""
         # cherg_gpv зазвичай "62" означає групу 6.2
-        if not cherg_gpv or cherg_gpv == "0" or len(cherg_gpv) > 2:
-            return "Не входить"
-        return ".".join(cherg_gpv)
+        if not cherg_gpv or cherg_gpv == "0":
+            return "Не визначено"
+        if len(cherg_gpv) == 2:
+            return f"{cherg_gpv[0]}.{cherg_gpv[1]}"
+        return cherg_gpv
     
     async def get_current_grafics(self) -> Dict[str, Any]:
         """Отримати поточні графіки відключень з меню"""
