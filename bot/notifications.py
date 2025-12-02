@@ -3,7 +3,7 @@ Notification service for checking and sending schedule updates
 """
 import asyncio
 from datetime import datetime, time
-from typing import Optional
+from typing import Optional, Dict
 from telegram import Bot
 from telegram.constants import ParseMode
 
@@ -20,6 +20,22 @@ class NotificationService:
         self.running = False
         self.last_image_url: Optional[str] = None
         self._tasks = []
+
+    def _format_location_block(self, context: Dict, formatted_group: str) -> str:
+        """Згенерувати блок з описом адреси/групи"""
+        if not context or context.get("context_type") != "address":
+            label = context.get("label") if context else None
+            label_text = label or f"Група {formatted_group}"
+            return (
+                f"📍 <b>Ваш опис:</b>\n"
+                f"   {label_text}\n\n"
+                f"🔌 <b>Обрана група ГПВ:</b> {formatted_group}\n\n"
+            )
+        return (
+            f"📍 <b>Ваша адреса:</b>\n"
+            f"   {context['city_name']}, {context['street_name']}, {context['building_name']}\n\n"
+            f"🔌 <b>Ваша група ГПВ:</b> {formatted_group}\n\n"
+        )
     
     async def start(self):
         """Запустити сервіс сповіщень"""
@@ -172,9 +188,7 @@ class NotificationService:
         
         message = (
             f"{icon} <b>Графік погодинних відключень {period}</b>\n\n"
-            f"📍 <b>Ваша адреса:</b>\n"
-            f"   {user_data['city_name']}, {user_data['street_name']}, {user_data['building_name']}\n\n"
-            f"⚡ <b>Ваша група ГПВ:</b> {formatted_group}\n\n"
+            f"{self._format_location_block(user_data, formatted_group)}"
             f"⏰ <b>Графік відключень:</b>\n"
             f"{outage_text}"
         )
@@ -249,9 +263,7 @@ class NotificationService:
                 
                 message = (
                     f"⚠️ <b>УВАГА! Графік відключень змінився!</b>\n\n"
-                    f"📍 <b>Ваша адреса:</b>\n"
-                    f"   {user['city_name']}, {user['street_name']}, {user['building_name']}\n\n"
-                    f"⚡ <b>Група ГПВ:</b> {formatted_group}\n\n"
+                    f"{self._format_location_block(user, formatted_group)}"
                     f"⏰ <b>Новий графік відключень:</b>\n"
                     f"{outage_text}"
                 )
@@ -269,14 +281,15 @@ class NotificationService:
     
     async def send_schedule_to_user(self, user_id: int) -> bool:
         """Відправити поточний графік конкретному користувачу"""
+        schedule_context = None
         try:
-            address = await db.get_user_address(user_id)
+            schedule_context = await db.get_schedule_context(user_id)
             
-            if not address:
+            if not schedule_context or not schedule_context.get("cherg_gpv"):
                 await self.bot.send_message(
                     chat_id=user_id,
-                    text="❌ Ви ще не налаштували свою адресу.\n"
-                         "Натисніть кнопку 'Налаштувати адресу' щоб обрати своє місто, вулицю та будинок.",
+                    text="❌ Ви ще не налаштували адресу або групу.\n"
+                         "Натисніть 'Налаштувати адресу' або надішліть <code>/schedule 4.1</code>.",
                     parse_mode=ParseMode.HTML
                 )
                 return False
@@ -292,7 +305,7 @@ class NotificationService:
                 return False
             
             raw_html = grafics.get("rawHtml", "")
-            cherg_gpv = address.get("cherg_gpv", "")
+            cherg_gpv = schedule_context.get("cherg_gpv", "")
             formatted_group = await api_service.get_schedule_group(cherg_gpv)
             
             # Парсити персоналізований графік
@@ -349,9 +362,7 @@ class NotificationService:
             
             message = (
                 f"⚡ <b>Графік погодинних відключень</b>\n\n"
-                f"📍 <b>Ваша адреса:</b>\n"
-                f"   {address['city_name']}, {address['street_name']}, {address['building_name']}\n\n"
-                f"🔌 <b>Ваша група ГПВ:</b> {formatted_group}\n\n"
+                f"{self._format_location_block(schedule_context, formatted_group)}"
                 f"{status_text}\n\n"
                 f"⏰ <b>Графік на сьогодні:</b>\n"
                 f"{outage_text}"

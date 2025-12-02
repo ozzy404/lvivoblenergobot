@@ -1,13 +1,57 @@
 """
 Telegram Bot handlers
 """
+import re
+from typing import Optional
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 
 from database import db
 from api_service import api_service
 from config import WEBAPP_URL
+
+
+def normalize_group_code(raw_value: str) -> Optional[str]:
+    """Привести введення користувача до формату черги ГПВ (наприклад 4.1 -> 41)"""
+    if not raw_value:
+        return None
+    cleaned = raw_value.strip().lower()
+    cleaned = cleaned.replace(",", ".")
+    cleaned = re.sub(r"(група|group)", "", cleaned)
+    digits_only = re.sub(r"\D", "", cleaned)
+    if 1 <= len(digits_only) <= 4:
+        return digits_only
+    return None
+
+
+def build_location_block(context: dict, formatted_group: str) -> str:
+    """Згенерувати текст про адресу/групу для повідомлень"""
+    if not context or context.get("context_type") != "address":
+        label = context.get("label") if context else None
+        label_text = label or f"Група {formatted_group}"
+        return (
+            f"📍 <b>Ваш опис:</b>\n"
+            f"   {label_text}\n\n"
+            f"🔌 <b>Обрана група ГПВ:</b> {formatted_group}\n\n"
+        )
+    return (
+        f"📍 <b>Ваша адреса:</b>\n"
+        f"   {context['city_name']}, {context['street_name']}, {context['building_name']}\n\n"
+        f"🔌 <b>Ваша група ГПВ:</b> {formatted_group}\n\n"
+    )
+
+
+async def safe_edit_message(query, *args, **kwargs):
+    """Обернути edit_message_text щоб ігнорувати помилку про незмінене повідомлення"""
+    try:
+        await query.edit_message_text(*args, **kwargs)
+    except BadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            return
+        raise
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -24,34 +68,43 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_name=user.last_name
     )
     
-    # Перевірити чи є збережена адреса
-    address = await db.get_user_address(user.id)
+    # Перевірити чи є збережений контекст (адреса або група)
+    schedule_context = await db.get_schedule_context(user.id)
     
-    print(f"[START] User {user.id} address: {address}")
+    print(f"[START] User {user.id} schedule context: {schedule_context}")
     
     welcome_text = (
         f"👋 Вітаю, {user.first_name}!\n\n"
         f"🔌 Я бот для відстеження графіків відключень електроенергії у Львівській області.\n\n"
     )
     
-    if address:
-        cherg_gpv = address.get("cherg_gpv", "")
+    if schedule_context:
+        cherg_gpv = schedule_context.get("cherg_gpv", "")
         formatted_group = await api_service.get_schedule_group(cherg_gpv)
         
-        welcome_text += (
-            f"📍 <b>Ваша адреса:</b>\n"
-            f"   {address['city_name']}, {address['street_name']}, {address['building_name']}\n"
-            f"⚡ <b>Група ГПВ:</b> {formatted_group}\n\n"
-        )
+        if schedule_context.get("context_type") == "address":
+            welcome_text += (
+                f"📍 <b>Ваша адреса:</b>\n"
+                f"   {schedule_context['city_name']}, {schedule_context['street_name']}, {schedule_context['building_name']}\n"
+                f"⚡ <b>Група ГПВ:</b> {formatted_group}\n\n"
+            )
+        else:
+            label = schedule_context.get("label") or f"Група {formatted_group}"
+            welcome_text += (
+                f"📍 <b>Ваш опис:</b>\n"
+                f"   {label}\n"
+                f"⚡ <b>Група ГПВ:</b> {formatted_group}\n\n"
+            )
     else:
         welcome_text += (
             f"📍 Ви ще не налаштували свою адресу.\n"
-            f"Натисніть кнопку нижче щоб обрати своє місто, вулицю та будинок.\n\n"
+            f"Натисніть кнопку нижче щоб обрати своє місто, вулицю та будинок\n"
+            f"або надішліть команду <code>/schedule 4.1</code> щоб швидко задати групу.\n\n"
         )
     
     welcome_text += "Оберіть дію:"
     
-    keyboard = get_main_keyboard(address is not None)
+    keyboard = get_main_keyboard(schedule_context is not None)
     
     await update.message.reply_text(
         welcome_text,
@@ -60,7 +113,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-def get_main_keyboard(has_address: bool = False) -> InlineKeyboardMarkup:
+def get_main_keyboard(has_schedule: bool = False) -> InlineKeyboardMarkup:
     """Отримати головну клавіатуру"""
     import time
     buttons = []
@@ -74,7 +127,7 @@ def get_main_keyboard(has_address: bool = False) -> InlineKeyboardMarkup:
         )
     ])
     
-    if has_address:
+    if has_schedule:
         buttons.append([
             InlineKeyboardButton("⚡ Показати графік", callback_data="show_schedule")
         ])
@@ -94,7 +147,12 @@ def get_main_keyboard(has_address: bool = False) -> InlineKeyboardMarkup:
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler для callback кнопок"""
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except BadRequest as exc:
+        if "query is too old" in str(exc).lower():
+            return
+        raise
     
     user_id = query.from_user.id
     data = query.data
@@ -125,23 +183,26 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_info(query)
     
     elif data == "back_to_main":
-        address = await db.get_user_address(user_id)
-        await query.edit_message_text(
+        schedule_context = await db.get_schedule_context(user_id)
+        await safe_edit_message(
+            query,
             "🏠 Головне меню\n\nОберіть дію:",
-            reply_markup=get_main_keyboard(address is not None),
+            reply_markup=get_main_keyboard(schedule_context is not None),
             parse_mode=ParseMode.HTML
         )
 
 
 async def show_schedule(query, user_id: int):
     """Показати поточний графік"""
+    schedule_context = None
     try:
-        address = await db.get_user_address(user_id)
+        schedule_context = await db.get_schedule_context(user_id)
         
-        if not address:
-            await query.edit_message_text(
+        if not schedule_context or not schedule_context.get("cherg_gpv"):
+            await safe_edit_message(
+                query,
                 "❌ Ви ще не налаштували свою адресу.\n"
-                "Натисніть кнопку 'Налаштувати адресу' щоб обрати своє місто, вулицю та будинок.",
+                "Натисніть кнопку 'Налаштувати адресу' або надішліть команду <code>/schedule 4.1</code>.",
                 reply_markup=get_main_keyboard(False),
                 parse_mode=ParseMode.HTML
             )
@@ -151,7 +212,7 @@ async def show_schedule(query, user_id: int):
         grafics = await api_service.get_current_grafics()
         
         if not grafics or not grafics.get("rawHtml"):
-            await query.edit_message_text(
+            await safe_edit_message(
                 "⚠️ Наразі немає доступних графіків відключень.",
                 reply_markup=get_main_keyboard(True),
                 parse_mode=ParseMode.HTML
@@ -159,7 +220,7 @@ async def show_schedule(query, user_id: int):
             return
         
         raw_html = grafics.get("rawHtml", "")
-        cherg_gpv = address.get("cherg_gpv", "")
+        cherg_gpv = schedule_context.get("cherg_gpv", "")
         formatted_group = await api_service.get_schedule_group(cherg_gpv)
         
         # Парсити персоналізований графік
@@ -218,9 +279,7 @@ async def show_schedule(query, user_id: int):
         
         message = (
             f"⚡ <b>Графік погодинних відключень</b>\n\n"
-            f"📍 <b>Ваша адреса:</b>\n"
-            f"   {address['city_name']}, {address['street_name']}, {address['building_name']}\n\n"
-            f"🔌 <b>Ваша група ГПВ:</b> {formatted_group}\n\n"
+            f"{build_location_block(schedule_context, formatted_group)}"
             f"{status_emoji} <b>{status_text}</b>\n\n"
             f"⏰ <b>Графік на сьогодні:</b>\n"
             f"{outage_text}"
@@ -232,7 +291,8 @@ async def show_schedule(query, user_id: int):
             [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
         ])
         
-        await query.edit_message_text(
+        await safe_edit_message(
+            query,
             message,
             reply_markup=keyboard,
             parse_mode=ParseMode.HTML
@@ -242,9 +302,9 @@ async def show_schedule(query, user_id: int):
         print(f"Error showing schedule: {e}")
         import traceback
         traceback.print_exc()
-        await query.edit_message_text(
+        await safe_edit_message(
             "❌ Помилка при отриманні графіку. Спробуйте пізніше.",
-            reply_markup=get_main_keyboard(True),
+            reply_markup=get_main_keyboard(schedule_context is not None),
             parse_mode=ParseMode.HTML
         )
 
@@ -275,7 +335,7 @@ async def show_notifications_menu(query, user_id: int):
             [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
         ]
     
-    await query.edit_message_text(
+    await safe_edit_message(
         text,
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode=ParseMode.HTML
@@ -300,7 +360,7 @@ async def show_addresses(query, user_id: int):
     addresses = await db.get_all_user_addresses(user_id)
     
     if not addresses:
-        await query.edit_message_text(
+        await safe_edit_message(
             "📋 У вас немає збережених адрес.\n\n"
             "Натисніть 'Налаштувати адресу' щоб додати.",
             reply_markup=InlineKeyboardMarkup([
@@ -329,7 +389,7 @@ async def show_addresses(query, user_id: int):
     
     buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")])
     
-    await query.edit_message_text(
+    await safe_edit_message(
         text,
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode=ParseMode.HTML
@@ -354,19 +414,20 @@ async def show_help(query):
         "ℹ️ <b>Допомога</b>\n\n"
         "<b>Як користуватись ботом:</b>\n\n"
         "1️⃣ <b>Налаштувати адресу</b>\n"
-        "   Натисніть кнопку і оберіть своє місто, вулицю та номер будинку.\n\n"
+        "   Натисніть кнопку і оберіть своє місто, вулицю та номер будинку.\n"
+        "   Або надішліть <code>/schedule 4.1</code> щоб одразу вказати групу.\n\n"
         "2️⃣ <b>Показати графік</b>\n"
         "   Перегляньте актуальний графік відключень для вашої групи.\n\n"
         "3️⃣ <b>Сповіщення</b>\n"
         "   Увімкніть сповіщення, щоб отримувати оновлення про зміни графіку.\n\n"
         "<b>Команди:</b>\n"
         "/start - Головне меню\n"
-        "/schedule - Показати графік\n"
+        "/schedule - Показати графік (можна <code>/schedule 4.1</code>)\n"
         "/notifications - Налаштування сповіщень\n"
         "/help - Ця довідка"
     )
     
-    await query.edit_message_text(
+    await safe_edit_message(
         text,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
@@ -389,7 +450,7 @@ async def show_info(query):
         "📧 Зв'язок: @your_username"
     )
     
-    await query.edit_message_text(
+    await safe_edit_message(
         text,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
@@ -402,8 +463,37 @@ async def show_info(query):
 async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler для команди /schedule"""
     from notifications import notification_service
+    user_id = update.effective_user.id
+    args = context.args if context.args else []
+    if args:
+        group_code = normalize_group_code(args[0])
+        if not group_code:
+            await update.message.reply_text(
+                "❌ Неправильний формат групи. Приклад: <code>/schedule 4.1</code>",
+                parse_mode=ParseMode.HTML
+            )
+            return
+        label = " ".join(args[1:]).strip() if len(args) > 1 else None
+        save_result = await db.set_manual_group(user_id, group_code, label)
+        if not save_result:
+            await update.message.reply_text(
+                "❌ Не вдалося зберегти групу. Спробуйте ще раз.",
+                parse_mode=ParseMode.HTML
+            )
+            return
+        formatted_manual_group = await api_service.get_schedule_group(group_code)
+        await update.message.reply_text(
+            f"✅ Групу {formatted_manual_group} збережено. Формую ваш графік...",
+            parse_mode=ParseMode.HTML
+        )
+    
     if notification_service:
-        await notification_service.send_schedule_to_user(update.effective_user.id)
+        await notification_service.send_schedule_to_user(user_id)
+    else:
+        await update.message.reply_text(
+            "⚠️ Сервіс ще запускається. Спробуйте надіслати /schedule знову за хвилину.",
+            parse_mode=ParseMode.HTML
+        )
 
 
 async def notifications_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -437,7 +527,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "ℹ️ <b>Допомога</b>\n\n"
         "<b>Доступні команди:</b>\n\n"
         "/start - Головне меню\n"
-        "/schedule - Показати графік відключень\n"
+        "/schedule - Показати графік (наприклад <code>/schedule 4.1</code>)\n"
         "/notifications - Налаштування сповіщень\n"
         "/help - Ця довідка\n\n"
         "Для налаштування адреси натисніть /start і оберіть 'Налаштувати адресу'."

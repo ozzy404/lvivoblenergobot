@@ -86,6 +86,18 @@ class Database:
                 )
             """)
             
+            # Таблиця для користувацьких груп (коли користувач задає групу вручну)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_manual_groups (
+                    user_id INTEGER PRIMARY KEY,
+                    group_code TEXT NOT NULL,
+                    label TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
+
             await db.commit()
     
     async def add_user(self, user_id: int, username: str = None, 
@@ -165,12 +177,87 @@ class Database:
                 
                 await db.commit()
                 print(f"[DB] Address saved successfully for user {user_id}")
+
+                # Якщо користувач зберігає адресу через WebApp, видалити ручну групу
+                await self.clear_manual_group(user_id)
                 return True
             except Exception as e:
                 print(f"[DB] Error saving address: {e}")
                 import traceback
                 traceback.print_exc()
                 return False
+
+    async def get_manual_group(self, user_id: int) -> Optional[Dict]:
+        """Отримати вручну налаштовану групу користувача"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM user_manual_groups WHERE user_id = ?",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def set_manual_group(self, user_id: int, group_code: str,
+                               label: Optional[str] = None) -> bool:
+        """Зберегти користувацьку групу ГПВ"""
+        label = label.strip() if label else None
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                async with db.execute(
+                    "SELECT user_id FROM users WHERE user_id = ?",
+                    (user_id,)
+                ) as cursor:
+                    if not await cursor.fetchone():
+                        await db.execute(
+                            "INSERT INTO users (user_id) VALUES (?)",
+                            (user_id,)
+                        )
+
+                await db.execute(
+                    """
+                    INSERT INTO user_manual_groups (user_id, group_code, label, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        group_code = excluded.group_code,
+                        label = excluded.label,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (user_id, group_code, label)
+                )
+                await db.commit()
+                return True
+            except Exception as e:
+                print(f"Error saving manual group: {e}")
+                return False
+
+    async def clear_manual_group(self, user_id: int) -> None:
+        """Видалити користувацьку групу"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "DELETE FROM user_manual_groups WHERE user_id = ?",
+                (user_id,)
+            )
+            await db.commit()
+
+    async def get_schedule_context(self, user_id: int) -> Optional[Dict]:
+        """Отримати контекст (адресу або ручну групу) для показу графіка"""
+        address = await self.get_user_address(user_id)
+        if address:
+            address["context_type"] = "address"
+            return address
+
+        manual = await self.get_manual_group(user_id)
+        if manual:
+            return {
+                "context_type": "manual",
+                "cherg_gpv": manual.get("group_code", ""),
+                "label": manual.get("label"),
+                "city_name": None,
+                "street_name": None,
+                "building_name": None
+            }
+        return None
     
     async def get_user_address(self, user_id: int) -> Optional[Dict]:
         """Отримати основну адресу користувача"""
@@ -229,6 +316,8 @@ class Database:
         """Отримати всіх користувачів з увімкненими сповіщеннями"""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
+            users: List[Dict[str, Any]] = []
+
             async with db.execute("""
                 SELECT u.user_id, ua.cherg_gpv, ua.city_name, ua.street_name, ua.building_name
                 FROM users u
@@ -236,7 +325,35 @@ class Database:
                 WHERE u.notifications_enabled = 1 AND ua.is_primary = 1
             """) as cursor:
                 rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+                for row in rows:
+                    data = dict(row)
+                    data["context_type"] = "address"
+                    users.append(data)
+
+            existing_ids = {user["user_id"] for user in users}
+
+            async with db.execute("""
+                SELECT u.user_id, mg.group_code, mg.label
+                FROM users u
+                JOIN user_manual_groups mg ON u.user_id = mg.user_id
+                WHERE u.notifications_enabled = 1
+            """) as cursor:
+                rows = await cursor.fetchall()
+                for row in rows:
+                    user_id = row["user_id"]
+                    if user_id in existing_ids:
+                        continue
+                    users.append({
+                        "user_id": user_id,
+                        "cherg_gpv": row["group_code"],
+                        "city_name": None,
+                        "street_name": None,
+                        "building_name": None,
+                        "label": row["label"],
+                        "context_type": "manual"
+                    })
+
+            return users
     
     async def get_last_schedule_hash(self) -> Optional[str]:
         """Отримати хеш останнього графіку"""
