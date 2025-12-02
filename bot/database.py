@@ -14,9 +14,11 @@ class Database:
         self.db_path = DATABASE_PATH
         # Створити директорію якщо не існує
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        print(f"[DB] Database path: {self.db_path}")
     
     async def init_db(self):
         """Ініціалізувати базу даних та створити таблиці"""
+        print(f"[DB] Initializing database at {self.db_path}")
         async with aiosqlite.connect(self.db_path) as db:
             # Таблиця користувачів
             await db.execute("""
@@ -116,9 +118,20 @@ class Database:
                                 street_name: str, building_name: str, 
                                 cherg_gpv: str) -> bool:
         """Зберегти адресу користувача"""
+        print(f"[DB] Saving address for user {user_id}: city_id={city_id}, street_id={street_id}, building={building_name}, cherg_gpv={cherg_gpv}")
         async with aiosqlite.connect(self.db_path) as db:
             try:
-                # Спочатку скинути primary для всіх адрес користувача
+                # Спочатку перевірити чи існує користувач, якщо ні - створити
+                async with db.execute(
+                    "SELECT user_id FROM users WHERE user_id = ?", (user_id,)
+                ) as cursor:
+                    if not await cursor.fetchone():
+                        print(f"[DB] User {user_id} not found, creating...")
+                        await db.execute(
+                            "INSERT INTO users (user_id) VALUES (?)", (user_id,)
+                        )
+                
+                # Скинути primary для всіх адрес користувача
                 await db.execute(
                     "UPDATE user_addresses SET is_primary = 0 WHERE user_id = ?",
                     (user_id,)
@@ -133,6 +146,7 @@ class Database:
                 
                 if existing:
                     # Оновити існуючу адресу
+                    print(f"[DB] Updating existing address id={existing[0]}")
                     await db.execute("""
                         UPDATE user_addresses 
                         SET is_primary = 1, cherg_gpv = ?, otg_id = ?, otg_name = ?
@@ -140,6 +154,7 @@ class Database:
                     """, (cherg_gpv, otg_id, otg_name, existing[0]))
                 else:
                     # Додати нову адресу
+                    print(f"[DB] Inserting new address for user {user_id}")
                     await db.execute("""
                         INSERT INTO user_addresses 
                         (user_id, otg_id, otg_name, city_id, city_name, street_id, 
@@ -149,13 +164,17 @@ class Database:
                           street_id, street_name, building_name, cherg_gpv))
                 
                 await db.commit()
+                print(f"[DB] Address saved successfully for user {user_id}")
                 return True
             except Exception as e:
-                print(f"Error saving address: {e}")
+                print(f"[DB] Error saving address: {e}")
+                import traceback
+                traceback.print_exc()
                 return False
     
     async def get_user_address(self, user_id: int) -> Optional[Dict]:
         """Отримати основну адресу користувача"""
+        print(f"[DB] Getting address for user {user_id}")
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("""
@@ -163,7 +182,9 @@ class Database:
                 WHERE user_id = ? AND is_primary = 1
             """, (user_id,)) as cursor:
                 row = await cursor.fetchone()
-                return dict(row) if row else None
+                result = dict(row) if row else None
+                print(f"[DB] Address for user {user_id}: {result}")
+                return result
     
     async def get_all_user_addresses(self, user_id: int) -> List[Dict]:
         """Отримати всі адреси користувача"""

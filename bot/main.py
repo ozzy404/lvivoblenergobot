@@ -90,7 +90,7 @@ def main():
     
     # Run bot
     logger.info("Starting bot...")
-    application.run_polling(allowed_updates=["message", "callback_query"])
+    application.run_polling(allowed_updates=["message", "callback_query", "web_app_data"])
 
 
 if __name__ == "__main__":

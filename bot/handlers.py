@@ -14,6 +14,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler для команди /start"""
     user = update.effective_user
     
+    print(f"[START] User {user.id} ({user.username}) started bot")
+    
     # Зберегти користувача в БД
     await db.add_user(
         user_id=user.id,
@@ -24,6 +26,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Перевірити чи є збережена адреса
     address = await db.get_user_address(user.id)
+    
+    print(f"[START] User {user.id} address: {address}")
     
     welcome_text = (
         f"👋 Вітаю, {user.first_name}!\n\n"
@@ -446,9 +450,16 @@ async def webapp_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Handler для даних з Web App"""
     import json
     
+    print(f"[WEBAPP] Received webapp data from user {update.effective_user.id}")
+    
     try:
-        data = json.loads(update.effective_message.web_app_data.data)
+        raw_data = update.effective_message.web_app_data.data
+        print(f"[WEBAPP] Raw data: {raw_data}")
+        
+        data = json.loads(raw_data)
         user_id = update.effective_user.id
+        
+        print(f"[WEBAPP] Parsed data: {data}")
         
         # Дані приходять в snake_case з WebApp
         city_id = data.get("city_id")
@@ -457,6 +468,8 @@ async def webapp_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         street_name = data.get("street_name", "")
         building_name = data.get("building_name", "")
         cherg_gpv = data.get("cherg_gpv", "")
+        
+        print(f"[WEBAPP] Saving address for user {user_id}: {city_name}, {street_name}, {building_name}, group: {cherg_gpv}")
         
         # Зберегти адресу
         success = await db.save_user_address(
@@ -470,6 +483,8 @@ async def webapp_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             building_name=building_name,
             cherg_gpv=cherg_gpv
         )
+        
+        print(f"[WEBAPP] Save result: {success}")
         
         if success:
             formatted_group = await api_service.get_schedule_group(cherg_gpv)
@@ -490,7 +505,7 @@ async def webapp_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             
     except Exception as e:
-        print(f"Error processing webapp data: {e}")
+        print(f"[WEBAPP] Error processing webapp data: {e}")
         import traceback
         traceback.print_exc()
         await update.message.reply_text(
