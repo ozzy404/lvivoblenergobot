@@ -213,6 +213,7 @@ async def show_schedule(query, user_id: int):
         
         if not grafics or not grafics.get("rawHtml"):
             await safe_edit_message(
+                query,
                 "⚠️ Наразі немає доступних графіків відключень.",
                 reply_markup=get_main_keyboard(True),
                 parse_mode=ParseMode.HTML
@@ -303,6 +304,7 @@ async def show_schedule(query, user_id: int):
         import traceback
         traceback.print_exc()
         await safe_edit_message(
+            query,
             "❌ Помилка при отриманні графіку. Спробуйте пізніше.",
             reply_markup=get_main_keyboard(schedule_context is not None),
             parse_mode=ParseMode.HTML
@@ -336,6 +338,7 @@ async def show_notifications_menu(query, user_id: int):
         ]
     
     await safe_edit_message(
+        query,
         text,
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode=ParseMode.HTML
@@ -361,6 +364,7 @@ async def show_addresses(query, user_id: int):
     
     if not addresses:
         await safe_edit_message(
+            query,
             "📋 У вас немає збережених адрес.\n\n"
             "Натисніть 'Налаштувати адресу' щоб додати.",
             reply_markup=InlineKeyboardMarkup([
@@ -390,6 +394,7 @@ async def show_addresses(query, user_id: int):
     buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")])
     
     await safe_edit_message(
+        query,
         text,
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode=ParseMode.HTML
@@ -428,6 +433,7 @@ async def show_help(query):
     )
     
     await safe_edit_message(
+        query,
         text,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
@@ -451,6 +457,7 @@ async def show_info(query):
     )
     
     await safe_edit_message(
+        query,
         text,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
