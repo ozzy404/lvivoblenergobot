@@ -24,6 +24,7 @@ from handlers import (
 )
 from notifications import NotificationService
 from api_service import api_service
+from firebase_service import firebase_service
 
 # Configure logging
 logging.basicConfig(
@@ -56,6 +57,7 @@ async def shutdown(application: Application):
         await notification_service.stop()
     
     await api_service.close()
+    await firebase_service.close()
     logger.info("Bot shutdown complete")
 
 

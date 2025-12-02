@@ -11,6 +11,7 @@ from telegram.error import BadRequest
 
 from database import db
 from api_service import api_service
+from user_context_service import user_context_service
 from config import WEBAPP_URL
 
 
@@ -69,7 +70,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     # Перевірити чи є збережений контекст (адреса або група)
-    schedule_context = await db.get_schedule_context(user.id)
+    schedule_context = await user_context_service.get_context(user.id)
     
     print(f"[START] User {user.id} schedule context: {schedule_context}")
     
@@ -183,7 +184,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_info(query)
     
     elif data == "back_to_main":
-        schedule_context = await db.get_schedule_context(user_id)
+        schedule_context = await user_context_service.get_context(user_id)
         await safe_edit_message(
             query,
             "🏠 Головне меню\n\nОберіть дію:",
@@ -196,7 +197,7 @@ async def show_schedule(query, user_id: int):
     """Показати поточний графік"""
     schedule_context = None
     try:
-        schedule_context = await db.get_schedule_context(user_id)
+        schedule_context = await user_context_service.get_context(user_id)
         
         if not schedule_context or not schedule_context.get("cherg_gpv"):
             await safe_edit_message(
@@ -497,7 +498,7 @@ async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if notification_service:
         success = await notification_service.send_schedule_to_user(user_id)
         if not success and not args:
-            schedule_context = await db.get_schedule_context(user_id)
+            schedule_context = await user_context_service.get_context(user_id)
             if not schedule_context or not schedule_context.get("cherg_gpv"):
                 await update.message.reply_text(
                     "❌ Спершу налаштуйте адресу у веб-формі або надішліть <code>/schedule 4.1</code>.",

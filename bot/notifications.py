@@ -9,6 +9,7 @@ from telegram.constants import ParseMode
 
 from api_service import api_service
 from database import db
+from user_context_service import user_context_service
 from config import CHECK_INTERVAL
 
 
@@ -283,7 +284,7 @@ class NotificationService:
         """Відправити поточний графік конкретному користувачу"""
         schedule_context = None
         try:
-            schedule_context = await db.get_schedule_context(user_id)
+            schedule_context = await user_context_service.get_context(user_id)
             
             if not schedule_context or not schedule_context.get("cherg_gpv"):
                 await self.bot.send_message(
