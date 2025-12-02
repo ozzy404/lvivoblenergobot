@@ -495,7 +495,14 @@ async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     if notification_service:
-        await notification_service.send_schedule_to_user(user_id)
+        success = await notification_service.send_schedule_to_user(user_id)
+        if not success and not args:
+            schedule_context = await db.get_schedule_context(user_id)
+            if not schedule_context or not schedule_context.get("cherg_gpv"):
+                await update.message.reply_text(
+                    "❌ Спершу налаштуйте адресу у веб-формі або надішліть <code>/schedule 4.1</code>.",
+                    parse_mode=ParseMode.HTML
+                )
     else:
         await update.message.reply_text(
             "⚠️ Сервіс ще запускається. Спробуйте надіслати /schedule знову за хвилину.",
