@@ -314,17 +314,20 @@ async def show_schedule(query, user_id: int):
 
 async def show_notifications_menu(query, user_id: int):
     """Показати меню налаштувань сповіщень"""
-    user = await db.get_user(user_id)
-    notifications_enabled = user.get("notifications_enabled", False) if user else False
+    # Читаємо з Firebase
+    from firebase_service import firebase_service
+    profile = await firebase_service.get_user_profile(user_id)
+    notifications_enabled = profile.get("notifications_enabled", False) if profile else False
     
     status = "✅ Увімкнено" if notifications_enabled else "❌ Вимкнено"
     
     text = (
         f"🔔 <b>Налаштування сповіщень</b>\n\n"
         f"Статус: {status}\n\n"
-        f"Коли увімкнено, ви будете отримувати сповіщення про:\n"
-        f"• Оновлення графіку відключень\n"
-        f"• Зміни у вашій групі ГПВ"
+        f"Коли увімкнено, ви будете отримувати:\n"
+        f"• 🌅 Ранковий графік на сьогодні (7:00)\n"
+        f"• 🌆 Вечірній графік на завтра (18:00)\n"
+        f"• ⚠️ Сповіщення при зміні графіку"
     )
     
     if notifications_enabled:
@@ -348,7 +351,12 @@ async def show_notifications_menu(query, user_id: int):
 
 async def toggle_notifications(query, user_id: int, enabled: bool):
     """Увімкнути/вимкнути сповіщення"""
-    success = await db.set_notifications(user_id, enabled)
+    # Зберігаємо в Firebase
+    from firebase_service import firebase_service
+    success = await firebase_service.set_notifications(user_id, enabled)
+    
+    # Також зберігаємо локально як бекап
+    await db.set_notifications(user_id, enabled)
     
     if success:
         status = "увімкнено ✅" if enabled else "вимкнено ❌"

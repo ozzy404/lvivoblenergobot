@@ -68,7 +68,7 @@ class FirebaseService:
 
         try:
             session = await self._get_session()
-            async with session.put(
+            async with session.patch(
                 url,
                 json=data,
                 timeout=aiohttp.ClientTimeout(total=15)
@@ -82,6 +82,69 @@ class FirebaseService:
         except Exception as exc:
             print(f"[FIREBASE] Error saving user {user_id}: {exc}")
         return False
+
+    async def set_notifications(self, user_id: int, enabled: bool) -> bool:
+        """Set notifications_enabled for user in Firebase"""
+        if not self.database_url:
+            return False
+
+        url = f"{self.database_url}/users/{user_id}/notifications_enabled.json"
+
+        try:
+            session = await self._get_session()
+            async with session.put(
+                url,
+                json=enabled,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
+                if resp.status == 200:
+                    print(f"[FIREBASE] Set notifications={enabled} for user {user_id}")
+                    return True
+                else:
+                    body = await resp.text()
+                    print(f"[FIREBASE] Error setting notifications: {resp.status} - {body}")
+        except Exception as exc:
+            print(f"[FIREBASE] Error setting notifications for user {user_id}: {exc}")
+        return False
+
+    async def get_all_users_with_notifications(self) -> list:
+        """Get all users who have notifications enabled"""
+        if not self.database_url:
+            return []
+
+        url = f"{self.database_url}/users.json"
+        # Firebase query to filter by notifications_enabled
+        params = {
+            'orderBy': '"notifications_enabled"',
+            'equalTo': 'true'
+        }
+
+        try:
+            session = await self._get_session()
+            async with session.get(
+                url,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if not data:
+                        return []
+                    
+                    users = []
+                    for user_id, user_data in data.items():
+                        if isinstance(user_data, dict) and user_data.get("cherg_gpv"):
+                            user_data["user_id"] = int(user_id)
+                            users.append(user_data)
+                    
+                    print(f"[FIREBASE] Found {len(users)} users with notifications")
+                    return users
+                else:
+                    body = await resp.text()
+                    print(f"[FIREBASE] Error getting users: {resp.status} - {body}")
+        except Exception as exc:
+            print(f"[FIREBASE] Error getting users with notifications: {exc}")
+        return []
 
 
 firebase_service = FirebaseService()

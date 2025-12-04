@@ -97,6 +97,19 @@ class Database:
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
             """)
+            
+            # Таблиця для хешів графіків по користувачах (для уникнення повторних сповіщень)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_schedule_hashes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    schedule_date TEXT NOT NULL,
+                    schedule_hash TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, schedule_date),
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
 
             await db.commit()
     
@@ -355,15 +368,49 @@ class Database:
 
             return users
     
-    async def get_last_schedule_hash(self) -> Optional[str]:
-        """Отримати хеш останнього графіку"""
+    async def get_last_schedule_hash(self, schedule_type: str = None) -> Optional[str]:
+        """Отримати хеш останнього графіку (today або tomorrow)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            if schedule_type:
+                async with db.execute("""
+                    SELECT image_url FROM schedule_cache 
+                    WHERE schedule_date LIKE ?
+                    ORDER BY last_check DESC LIMIT 1
+                """, (f"%{schedule_type}%",)) as cursor:
+                    row = await cursor.fetchone()
+                    return row[0] if row else None
+            else:
+                async with db.execute("""
+                    SELECT image_url FROM schedule_cache 
+                    ORDER BY last_check DESC LIMIT 1
+                """) as cursor:
+                    row = await cursor.fetchone()
+                    return row[0] if row else None
+    
+    async def get_user_group_hash(self, user_id: int, schedule_date: str) -> Optional[str]:
+        """Отримати збережений хеш графіку для користувача"""
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute("""
-                SELECT image_url FROM schedule_cache 
-                ORDER BY last_check DESC LIMIT 1
-            """) as cursor:
+                SELECT schedule_hash FROM user_schedule_hashes 
+                WHERE user_id = ? AND schedule_date = ?
+            """, (user_id, schedule_date)) as cursor:
                 row = await cursor.fetchone()
                 return row[0] if row else None
+    
+    async def save_user_group_hash(self, user_id: int, schedule_date: str, schedule_hash: str) -> bool:
+        """Зберегти хеш графіку для користувача"""
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                await db.execute("""
+                    INSERT OR REPLACE INTO user_schedule_hashes 
+                    (user_id, schedule_date, schedule_hash, created_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                """, (user_id, schedule_date, schedule_hash))
+                await db.commit()
+                return True
+            except Exception as e:
+                print(f"Error saving user schedule hash: {e}")
+                return False
     
     async def save_schedule_hash(self, schedule_date: str, image_url: str, raw_html: str = None) -> bool:
         """Зберегти хеш нового графіку"""

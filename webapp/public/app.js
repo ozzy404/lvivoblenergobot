@@ -963,6 +963,10 @@ function setupEventListeners() {
             const filtered = filterItems(state.streets, term, 'street');
             renderDropdown(elements.streetDropdown, filtered, 'street');
         }
+        // Скролимо до поля вводу щоб було видно з клавіатурою
+        setTimeout(() => {
+            elements.stepStreet.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
     });
     
     // Building search
@@ -977,6 +981,10 @@ function setupEventListeners() {
         const term = elements.buildingSearch.value.trim();
         const filtered = filterItems(state.buildings, term, 'building');
         renderDropdown(elements.buildingDropdown, filtered, 'building');
+        // Скролимо до поля вводу щоб було видно з клавіатурою
+        setTimeout(() => {
+            elements.stepBuilding.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
     });
     
     // Clear buttons

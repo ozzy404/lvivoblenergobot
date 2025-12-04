@@ -3,12 +3,13 @@ Notification service for checking and sending schedule updates
 """
 import asyncio
 from datetime import datetime, time
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from telegram import Bot
 from telegram.constants import ParseMode
 
 from api_service import api_service
 from database import db
+from firebase_service import firebase_service
 from user_context_service import user_context_service
 from config import CHECK_INTERVAL
 
@@ -43,14 +44,13 @@ class NotificationService:
         self.running = True
         print("🔔 Notification service started")
         
-        # Отримати останній збережений хеш
-        self.last_image_url = await db.get_last_schedule_hash()
+        # Отримати останні збережені хеші
+        self.last_today_hash = await db.get_last_schedule_hash("today")
+        self.last_tomorrow_hash = await db.get_last_schedule_hash("tomorrow")
         
-        # Запустити фонові задачі
+        # Запустити фонову задачу перевірки оновлень
         self._tasks = [
             asyncio.create_task(self._check_for_updates_loop()),
-            asyncio.create_task(self._schedule_morning_notifications()),
-            asyncio.create_task(self._schedule_tomorrow_notifications())
         ]
     
     async def stop(self):
@@ -72,181 +72,140 @@ class NotificationService:
                 print(f"Error in update check loop: {e}")
                 await asyncio.sleep(60)
     
-    async def _schedule_morning_notifications(self):
-        """Відправляти ранкові сповіщення з графіком на сьогодні о 7:00"""
-        while self.running:
-            try:
-                now = datetime.now()
-                target_time = time(7, 0)
+    async def check_for_updates(self):
+        """Перевірити наявність оновлень графіку на сьогодні і завтра"""
+        import hashlib
+        
+        # Перевіряємо графік на СЬОГОДНІ
+        try:
+            today_grafics = await api_service.get_current_grafics()
+            
+            if today_grafics and today_grafics.get("rawHtml"):
+                raw_html = today_grafics.get("rawHtml", "")
+                schedule_date = today_grafics.get("date", "")
+                current_hash = hashlib.md5(raw_html.encode()).hexdigest()
                 
-                if now.time().hour == target_time.hour and now.time().minute == target_time.minute:
-                    await self._send_today_schedule_to_all()
-                    await asyncio.sleep(60)
-                else:
-                    await asyncio.sleep(30)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                print(f"Error in morning notifications: {e}")
-                await asyncio.sleep(60)
-    
-    async def _schedule_tomorrow_notifications(self):
-        """Відправляти сповіщення про графік на завтра о 18:00"""
-        while self.running:
-            try:
-                now = datetime.now()
-                target_time = time(18, 0)
+                if self.last_today_hash and current_hash != self.last_today_hash:
+                    print(f"📢 Today's schedule updated!")
+                    is_new = await db.save_schedule_hash(schedule_date, current_hash, raw_html)
+                    if is_new:
+                        await self.send_change_notifications(raw_html, schedule_date, "сьогодні")
                 
-                if now.time().hour == target_time.hour and now.time().minute == target_time.minute:
-                    await self._send_tomorrow_schedule_to_all()
-                    await asyncio.sleep(60)
-                else:
-                    await asyncio.sleep(30)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                print(f"Error in tomorrow notifications: {e}")
-                await asyncio.sleep(60)
+                self.last_today_hash = current_hash
+                
+        except Exception as e:
+            print(f"Error checking today's schedule: {e}")
+        
+        # Перевіряємо графік на ЗАВТРА
+        try:
+            tomorrow_grafics = await api_service.get_tomorrow_grafics()
+            
+            if tomorrow_grafics and tomorrow_grafics.get("rawHtml"):
+                raw_html = tomorrow_grafics.get("rawHtml", "")
+                schedule_date = tomorrow_grafics.get("date", "")
+                current_hash = hashlib.md5(raw_html.encode()).hexdigest()
+                
+                if self.last_tomorrow_hash is None:
+                    # Перший раз бачимо графік на завтра - повідомляємо
+                    print(f"📢 Tomorrow's schedule appeared!")
+                    await db.save_schedule_hash(schedule_date, current_hash, raw_html)
+                    await self.send_tomorrow_notifications(raw_html, schedule_date)
+                elif current_hash != self.last_tomorrow_hash:
+                    # Графік на завтра змінився
+                    print(f"📢 Tomorrow's schedule updated!")
+                    is_new = await db.save_schedule_hash(schedule_date, current_hash, raw_html)
+                    if is_new:
+                        await self.send_change_notifications(raw_html, schedule_date, "завтра")
+                
+                self.last_tomorrow_hash = current_hash
+            else:
+                # Графіку на завтра ще немає
+                self.last_tomorrow_hash = None
+                
+        except Exception as e:
+            print(f"Error checking tomorrow's schedule: {e}")
     
-    async def _send_today_schedule_to_all(self):
-        """Відправити графік на сьогодні всім користувачам"""
-        users = await db.get_users_with_notifications()
+    async def send_change_notifications(self, raw_html: str, schedule_date: str, period: str = "сьогодні"):
+        """Відправити сповіщення користувачам про зміни в їхній групі"""
+        import hashlib
+        
+        # Беремо користувачів з Firebase
+        users = await firebase_service.get_all_users_with_notifications()
         
         if not users:
+            print("No users with notifications enabled")
             return
         
-        schedule = await api_service.get_current_grafics()
+        print(f"📢 Checking schedule changes for {len(users)} users...")
+        sent_count = 0
         
-        if not schedule or not schedule.get("rawHtml"):
-            print("No schedule available for today")
-            return
-        
-        print(f"📢 Sending today's schedule to {len(users)} users...")
-        
-        schedule_date = schedule.get("date", datetime.now().strftime("%Y-%m-%d"))
-        
-        for user_data in users:
-            user_id = user_data["user_id"]
-            
-            # Перевірити чи вже відправляли сьогодні
-            if await db.check_notification_sent(user_id, "daily_schedule", schedule_date):
-                continue
-            
+        for user in users:
             try:
-                await self._send_schedule_message(user_id, user_data, schedule, "🌅", "на сьогодні")
-                await db.mark_notification_sent(user_id, "daily_schedule", schedule_date)
+                user_id = user["user_id"]
+                cherg_gpv = user.get("cherg_gpv", "")
+                formatted_group = await api_service.get_schedule_group(cherg_gpv)
+                
+                # Парсити персоналізований графік для цієї групи
+                parsed_schedule = api_service.parse_schedule_for_group(raw_html, cherg_gpv)
+                outages = parsed_schedule.get("outages", [])
+                
+                # Створюємо хеш для графіка конкретної групи
+                group_schedule_str = str(outages)
+                group_hash = hashlib.md5(group_schedule_str.encode()).hexdigest()
+                
+                # Перевіряємо чи змінився графік для цієї групи
+                last_group_hash = await db.get_user_group_hash(user_id, schedule_date)
+                
+                if last_group_hash == group_hash:
+                    # Графік для цієї групи не змінився
+                    continue
+                
+                # Зберігаємо новий хеш
+                await db.save_user_group_hash(user_id, schedule_date, group_hash)
+                
+                # Форматувати текст відключень
+                if outages:
+                    outage_text = ""
+                    for outage in outages:
+                        outage_text += f"   🔴 <b>{outage['start']} - {outage['end']}</b>\n"
+                else:
+                    outage_text = "   🟢 <b>Відключень не заплановано</b>\n"
+                
+                message = (
+                    f"⚠️ <b>Графік на {period} змінився!</b>\n\n"
+                    f"{self._format_location_block(user, formatted_group)}"
+                    f"⏰ <b>Графік відключень:</b>\n"
+                    f"{outage_text}"
+                )
+                
+                await self.bot.send_message(
+                    chat_id=user_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML
+                )
+                
+                sent_count += 1
                 await asyncio.sleep(0.5)
+                
             except Exception as e:
-                print(f"Error sending schedule to user {user_id}: {e}")
-    
-    async def _send_tomorrow_schedule_to_all(self):
-        """Відправити графік на завтра всім користувачам"""
-        users = await db.get_users_with_notifications()
+                print(f"Error sending notification to {user.get('user_id')}: {e}")
+        
+        print(f"📢 Sent {sent_count} change notifications")
+
+    async def send_tomorrow_notifications(self, raw_html: str, schedule_date: str):
+        """Відправити сповіщення про новий графік на завтра"""
+        # Беремо користувачів з Firebase
+        users = await firebase_service.get_all_users_with_notifications()
         
         if not users:
-            return
-        
-        schedule = await api_service.get_tomorrow_grafics()
-        
-        if not schedule or not schedule.get("rawHtml"):
-            print("No schedule available for tomorrow yet")
+            print("No users with notifications enabled")
             return
         
         print(f"📢 Sending tomorrow's schedule to {len(users)} users...")
         
-        schedule_date = schedule.get("date", "")
-        
-        for user_data in users:
-            user_id = user_data["user_id"]
-            
-            if await db.check_notification_sent(user_id, "tomorrow_schedule", schedule_date):
-                continue
-            
-            try:
-                await self._send_schedule_message(user_id, user_data, schedule, "🌆", "на завтра")
-                await db.mark_notification_sent(user_id, "tomorrow_schedule", schedule_date)
-                await asyncio.sleep(0.5)
-            except Exception as e:
-                print(f"Error sending tomorrow schedule to user {user_id}: {e}")
-    
-    async def _send_schedule_message(self, user_id: int, user_data: dict, schedule: dict, icon: str, period: str):
-        """Відправити повідомлення з персоналізованим графіком"""
-        cherg_gpv = user_data.get("cherg_gpv", "")
-        formatted_group = await api_service.get_schedule_group(cherg_gpv)
-        
-        # Парсити графік для групи користувача
-        raw_html = schedule.get("rawHtml", "")
-        parsed_schedule = api_service.parse_schedule_for_group(raw_html, cherg_gpv)
-        outages = parsed_schedule.get("outages", [])
-        
-        # Форматувати текст відключень
-        if outages:
-            outage_text = ""
-            for outage in outages:
-                outage_text += f"   🔴 <b>{outage['start']} - {outage['end']}</b>\n"
-        else:
-            outage_text = "   🟢 <b>Відключень не заплановано</b>\n"
-        
-        message = (
-            f"{icon} <b>Графік погодинних відключень {period}</b>\n\n"
-            f"{self._format_location_block(user_data, formatted_group)}"
-            f"⏰ <b>Графік відключень:</b>\n"
-            f"{outage_text}"
-        )
-        
-        await self.bot.send_message(
-            chat_id=user_id,
-            text=message,
-            parse_mode=ParseMode.HTML
-        )
-    
-    async def check_for_updates(self):
-        """Перевірити наявність оновлень графіку"""
-        try:
-            grafics = await api_service.get_current_grafics()
-            
-            if not grafics:
-                return
-            
-            raw_html = grafics.get("rawHtml", "")
-            schedule_date = grafics.get("date", "")
-            current_image_url = grafics.get("imageUrl", "")
-            
-            if not raw_html:
-                return
-            
-            full_image_url = f"https://api.loe.lviv.ua{current_image_url}" if current_image_url else ""
-            
-            # Перевірити чи змінився графік (використовуємо rawHtml як основний ідентифікатор)
-            # Створюємо хеш з rawHtml для порівняння
-            import hashlib
-            current_hash = hashlib.md5(raw_html.encode()).hexdigest()
-            
-            if self.last_image_url and current_hash != self.last_image_url:
-                print(f"📢 Schedule updated! Hash changed.")
-                
-                # Зберегти новий хеш
-                is_new = await db.save_schedule_hash(schedule_date, current_hash, raw_html)
-                
-                if is_new:
-                    await self.send_change_notifications(raw_html, schedule_date)
-            
-            self.last_image_url = current_hash
-                
-        except Exception as e:
-            print(f"Error checking for updates: {e}")
-    
-    async def send_change_notifications(self, raw_html: str, schedule_date: str):
-        """Відправити сповіщення всім підписаним користувачам про зміни"""
-        users = await db.get_users_with_notifications()
-        
-        if not users:
-            return
-        
-        print(f"📢 Sending change notifications to {len(users)} users...")
-        
         for user in users:
             try:
+                user_id = user["user_id"]
                 cherg_gpv = user.get("cherg_gpv", "")
                 formatted_group = await api_service.get_schedule_group(cherg_gpv)
                 
@@ -263,14 +222,14 @@ class NotificationService:
                     outage_text = "   🟢 <b>Відключень не заплановано</b>\n"
                 
                 message = (
-                    f"⚠️ <b>УВАГА! Графік відключень змінився!</b>\n\n"
+                    f"📅 <b>Графік на завтра опубліковано!</b>\n\n"
                     f"{self._format_location_block(user, formatted_group)}"
-                    f"⏰ <b>Новий графік відключень:</b>\n"
+                    f"⏰ <b>Графік відключень:</b>\n"
                     f"{outage_text}"
                 )
                 
                 await self.bot.send_message(
-                    chat_id=user["user_id"],
+                    chat_id=user_id,
                     text=message,
                     parse_mode=ParseMode.HTML
                 )
@@ -278,7 +237,7 @@ class NotificationService:
                 await asyncio.sleep(0.5)
                 
             except Exception as e:
-                print(f"Error sending notification to {user['user_id']}: {e}")
+                print(f"Error sending tomorrow notification to {user.get('user_id')}: {e}")
     
     async def send_schedule_to_user(self, user_id: int) -> bool:
         """Відправити поточний графік конкретному користувачу"""
