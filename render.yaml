@@ -1,0 +1,15 @@
+services:
+  - type: background
+    name: lviv-energy-bot
+    runtime: python
+    buildCommand: pip install -r bot/requirements.txt
+    startCommand: cd bot && python main.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: FIREBASE_DATABASE_URL
+        sync: false
+      - key: WEBAPP_URL
+        value: https://loenergo.web.app
+      - key: PYTHONUNBUFFERED
+        value: "1"

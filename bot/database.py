@@ -475,6 +475,34 @@ class Database:
                 print(f"Error marking notification sent: {e}")
                 return False
 
+    async def delete_all_user_data(self, user_id: int) -> bool:
+        """Видалити всі дані користувача з усіх таблиць"""
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                # Видаляємо адреси
+                await db.execute("DELETE FROM user_addresses WHERE user_id = ?", (user_id,))
+                
+                # Видаляємо налаштування груп
+                await db.execute("DELETE FROM user_manual_groups WHERE user_id = ?", (user_id,))
+                
+                # Видаляємо сповіщення
+                await db.execute("DELETE FROM sent_notifications WHERE user_id = ?", (user_id,))
+                
+                # Видаляємо хеші графіків
+                await db.execute("DELETE FROM user_schedule_hashes WHERE user_id = ?", (user_id,))
+                
+                # Оновлюємо дані користувача (скидаємо сповіщення)
+                await db.execute("""
+                    UPDATE users SET notifications_enabled = 0 WHERE user_id = ?
+                """, (user_id,))
+                
+                await db.commit()
+                print(f"[DB] Deleted all data for user {user_id}")
+                return True
+            except Exception as e:
+                print(f"Error deleting user data: {e}")
+                return False
+
 
 # Singleton instance
 db = Database()

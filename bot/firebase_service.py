@@ -107,6 +107,29 @@ class FirebaseService:
             print(f"[FIREBASE] Error setting notifications for user {user_id}: {exc}")
         return False
 
+    async def delete_user_profile(self, user_id: int) -> bool:
+        """Delete user profile from Firebase Realtime Database"""
+        if not self.database_url:
+            return False
+
+        url = f"{self.database_url}/users/{user_id}.json"
+
+        try:
+            session = await self._get_session()
+            async with session.delete(
+                url,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
+                if resp.status == 200:
+                    print(f"[FIREBASE] Deleted user {user_id}")
+                    return True
+                else:
+                    body = await resp.text()
+                    print(f"[FIREBASE] Error deleting user {user_id}: {resp.status} - {body}")
+        except Exception as exc:
+            print(f"[FIREBASE] Error deleting user {user_id}: {exc}")
+        return False
+
     async def get_all_users_with_notifications(self) -> list:
         """Get all users who have notifications enabled"""
         if not self.database_url:

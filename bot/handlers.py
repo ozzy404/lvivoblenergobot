@@ -132,14 +132,10 @@ def get_main_keyboard(has_schedule: bool = False) -> InlineKeyboardMarkup:
         buttons.append([
             InlineKeyboardButton("⚡ Показати графік", callback_data="show_schedule")
         ])
-        buttons.append([
-            InlineKeyboardButton("🔔 Сповіщення", callback_data="notifications"),
-            InlineKeyboardButton("📋 Мої адреси", callback_data="my_addresses")
-        ])
     
     buttons.append([
-        InlineKeyboardButton("ℹ️ Допомога", callback_data="help"),
-        InlineKeyboardButton("📊 Інформація", callback_data="info")
+        InlineKeyboardButton("⚙️ Налаштування", callback_data="settings"),
+        InlineKeyboardButton("ℹ️ Допомога", callback_data="help")
     ])
     
     return InlineKeyboardMarkup(buttons)
@@ -170,18 +166,20 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "disable_notifications":
         await toggle_notifications(query, user_id, False)
     
-    elif data == "my_addresses":
-        await show_addresses(query, user_id)
+    elif data == "settings":
+        await show_settings_menu(query, user_id)
     
-    elif data.startswith("delete_address_"):
-        address_id = int(data.replace("delete_address_", ""))
-        await delete_address(query, user_id, address_id)
+    elif data == "reset_data":
+        await show_reset_confirmation(query, user_id)
+    
+    elif data == "confirm_reset":
+        await reset_user_data(query, user_id)
+    
+    elif data == "cancel_reset":
+        await show_settings_menu(query, user_id)
     
     elif data == "help":
         await show_help(query)
-    
-    elif data == "info":
-        await show_info(query)
     
     elif data == "back_to_main":
         schedule_context = await user_context_service.get_context(user_id)
@@ -364,7 +362,99 @@ async def toggle_notifications(query, user_id: int, enabled: bool):
     else:
         await query.answer("Помилка при зміні налаштувань")
     
-    await show_notifications_menu(query, user_id)
+    await show_settings_menu(query, user_id)
+
+
+async def show_settings_menu(query, user_id: int):
+    """Показати меню налаштувань"""
+    from firebase_service import firebase_service
+    
+    # Отримуємо статус сповіщень
+    profile = await firebase_service.get_user_profile(user_id)
+    notifications_enabled = profile.get('notifications_enabled', False) if profile else False
+    
+    notif_status = "🔔 Увімкнено" if notifications_enabled else "🔕 Вимкнено"
+    
+    text = (
+        "⚙️ <b>Налаштування</b>\n\n"
+        f"📢 <b>Сповіщення:</b> {notif_status}\n"
+        "   Отримувати повідомлення про зміни графіку\n\n"
+        "🗑 <b>Скинути дані:</b>\n"
+        "   Видалити всі збережені дані (адреса, налаштування)"
+    )
+    
+    buttons = []
+    
+    # Кнопка сповіщень
+    if notifications_enabled:
+        buttons.append([InlineKeyboardButton("🔕 Вимкнути сповіщення", callback_data="disable_notifications")])
+    else:
+        buttons.append([InlineKeyboardButton("🔔 Увімкнути сповіщення", callback_data="enable_notifications")])
+    
+    # Кнопка скидання
+    buttons.append([InlineKeyboardButton("🗑 Скинути всі дані", callback_data="reset_data")])
+    
+    # Назад
+    buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")])
+    
+    await safe_edit_message(
+        query,
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def show_reset_confirmation(query, user_id: int):
+    """Показати підтвердження скидання даних"""
+    text = (
+        "⚠️ <b>Скинути всі дані?</b>\n\n"
+        "Будуть видалені:\n"
+        "• Збережена адреса\n"
+        "• Налаштування сповіщень\n"
+        "• Історія\n\n"
+        "❗️ Цю дію неможливо скасувати!"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton("✅ Так, скинути", callback_data="confirm_reset")],
+        [InlineKeyboardButton("❌ Скасувати", callback_data="cancel_reset")]
+    ]
+    
+    await safe_edit_message(
+        query,
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def reset_user_data(query, user_id: int):
+    """Скинути всі дані користувача"""
+    from firebase_service import firebase_service
+    
+    try:
+        # Видаляємо з Firebase
+        await firebase_service.delete_user_profile(user_id)
+        
+        # Видаляємо з локальної БД
+        await db.delete_all_user_data(user_id)
+        
+        await query.answer("✅ Дані успішно видалено!")
+        
+        # Повертаємось до головного меню
+        await safe_edit_message(
+            query,
+            "✅ <b>Дані скинуто!</b>\n\n"
+            "Всі ваші дані видалено.\n"
+            "Налаштуйте адресу заново.",
+            reply_markup=get_main_keyboard(False),
+            parse_mode=ParseMode.HTML
+        )
+    except Exception as e:
+        print(f"Error resetting user data: {e}")
+        await query.answer("❌ Помилка при скиданні даних")
+        await show_settings_menu(query, user_id)
 
 
 async def show_addresses(query, user_id: int):

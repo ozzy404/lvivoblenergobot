@@ -597,29 +597,85 @@ function showSavedView() {
     elements.selectView.style.display = 'none';
     elements.footerSelect.style.display = 'none';
     
-    // Налаштувати MainButton для синхронізації з ботом
-    setupMainButtonForSync();
+    // Налаштувати SettingsButton для скидання даних
+    setupSettingsButton();
 }
 
-// Налаштувати Telegram MainButton для синхронізації адреси з ботом
-function setupMainButtonForSync() {
-    if (!state.savedAddress || !state.savedAddress.cherg_gpv) return;
-    
+// Налаштувати Telegram SettingsButton для скидання даних
+function setupSettingsButton() {
     try {
-        // Показуємо кнопку тільки якщо дані ще не синхронізовані
-        if (!dataSentToBot) {
-            tg.MainButton.setText('💾 Зберегти в боті');
-            tg.MainButton.show();
-            tg.MainButton.onClick(() => {
-                syncAddressWithBot();
+        if (tg.SettingsButton) {
+            tg.SettingsButton.show();
+            tg.SettingsButton.onClick(() => {
+                showResetConfirmation();
             });
         }
     } catch(e) {
-        console.log('MainButton not available:', e);
+        console.log('SettingsButton not available:', e);
     }
 }
 
-// Синхронізувати збережену адресу з ботом
+// Показати підтвердження скидання
+function showResetConfirmation() {
+    try {
+        tg.showConfirm(
+            'Скинути всі дані?\n\nБуде видалено збережену адресу та налаштування.',
+            (confirmed) => {
+                if (confirmed) {
+                    resetAllData();
+                }
+            }
+        );
+    } catch(e) {
+        // Fallback для старих версій
+        if (confirm('Скинути всі дані?\n\nБуде видалено збережену адресу та налаштування.')) {
+            resetAllData();
+        }
+    }
+}
+
+// Скинути всі дані
+async function resetAllData() {
+    try {
+        // Видаляємо з localStorage
+        localStorage.removeItem(STORAGE_KEY);
+        
+        // Видаляємо з Firebase
+        const userId = getTelegramUserId();
+        if (userId && firebaseDb) {
+            await firebaseDb.ref('users/' + userId).remove();
+            console.log('Deleted from Firebase');
+        }
+        
+        // Скидаємо стан
+        state.savedAddress = null;
+        state.currentSchedule = null;
+        state.tomorrowSchedule = null;
+        state.currentPowerStatus = null;
+        dataSentToBot = false;
+        
+        // Показуємо повідомлення
+        try {
+            tg.showAlert('✅ Дані успішно скинуто!');
+            tg.HapticFeedback.notificationOccurred('success');
+        } catch(e) {
+            alert('✅ Дані успішно скинуто!');
+        }
+        
+        // Показуємо вибір адреси
+        showSelectView();
+        
+    } catch(e) {
+        console.error('Error resetting data:', e);
+        try {
+            tg.showAlert('❌ Помилка при скиданні даних');
+        } catch(ex) {
+            alert('❌ Помилка при скиданні даних');
+        }
+    }
+}
+
+// Синхронізувати збережену адресу з ботом (викликається автоматично при збереженні)
 function syncAddressWithBot() {
     if (!state.savedAddress || dataSentToBot) return;
     
@@ -636,6 +692,7 @@ function syncAddressWithBot() {
         tg.HapticFeedback.notificationOccurred('success');
         tg.sendData(JSON.stringify(data));
         dataSentToBot = true;
+        console.log('Address synced with bot');
     } catch(e) {
         console.log('Cannot sync with bot:', e);
     }
