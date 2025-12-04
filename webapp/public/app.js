@@ -3,8 +3,11 @@ const tg = window.Telegram.WebApp;
 tg.expand();
 try { tg.enableClosingConfirmation(); } catch(e) {}
 
+// Прапорець чи дані вже синхронізовані з ботом
+let dataSentToBot = false;
+
 // Version
-const VERSION = 'v2.1';
+const VERSION = 'v2.2';
 console.log('LOE WebApp ' + VERSION);
 
 // API Configuration - завжди використовуємо CORS proxy для швидкості
@@ -515,6 +518,57 @@ function showSavedView() {
     elements.savedView.style.display = 'block';
     elements.selectView.style.display = 'none';
     elements.footerSelect.style.display = 'none';
+    
+    // Налаштувати MainButton для синхронізації з ботом
+    setupMainButtonForSync();
+}
+
+// Налаштувати Telegram MainButton для синхронізації адреси з ботом
+function setupMainButtonForSync() {
+    if (!state.savedAddress || !state.savedAddress.cherg_gpv) return;
+    
+    try {
+        // Показуємо кнопку тільки якщо дані ще не синхронізовані
+        if (!dataSentToBot) {
+            tg.MainButton.setText('💾 Зберегти в боті');
+            tg.MainButton.show();
+            tg.MainButton.onClick(() => {
+                syncAddressWithBot();
+            });
+        }
+    } catch(e) {
+        console.log('MainButton not available:', e);
+    }
+}
+
+// Синхронізувати збережену адресу з ботом
+function syncAddressWithBot() {
+    if (!state.savedAddress || dataSentToBot) return;
+    
+    const data = {
+        city_id: state.savedAddress.city_id,
+        city_name: state.savedAddress.city_name,
+        street_id: state.savedAddress.street_id,
+        street_name: state.savedAddress.street_name,
+        building_name: state.savedAddress.building_name,
+        cherg_gpv: state.savedAddress.cherg_gpv
+    };
+    
+    try {
+        tg.HapticFeedback.notificationOccurred('success');
+        tg.sendData(JSON.stringify(data));
+        dataSentToBot = true;
+    } catch(e) {
+        console.log('Cannot sync with bot:', e);
+    }
+}
+
+// Сховати MainButton
+function hideMainButton() {
+    try {
+        tg.MainButton.hide();
+        tg.MainButton.offClick();
+    } catch(e) {}
 }
 
 function showSelectView() {
@@ -522,6 +576,9 @@ function showSelectView() {
     elements.savedView.style.display = 'none';
     elements.selectView.style.display = 'block';
     elements.footerSelect.style.display = 'block';
+    
+    // Сховати MainButton коли вибираємо нову адресу
+    hideMainButton();
     
     if (state.cities.length === 0) {
         loadCities();
@@ -779,6 +836,7 @@ function submitSelection() {
     try { 
         tg.HapticFeedback.notificationOccurred('success'); 
         tg.sendData(JSON.stringify(data));
+        dataSentToBot = true;
     } catch(e) {
         console.log('Not in Telegram WebApp context');
     }
@@ -900,6 +958,19 @@ function setupEventListeners() {
         retryBtn.addEventListener('click', () => {
             location.reload();
         });
+    }
+    
+    // Обробник BackButton - при закритті синхронізуємо дані
+    try {
+        tg.BackButton.onClick(() => {
+            if (state.savedAddress && state.savedAddress.cherg_gpv && !dataSentToBot) {
+                syncAddressWithBot();
+            } else {
+                tg.close();
+            }
+        });
+    } catch(e) {
+        console.log('BackButton handler not available:', e);
     }
 }
 
