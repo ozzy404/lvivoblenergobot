@@ -7,8 +7,42 @@ try { tg.enableClosingConfirmation(); } catch(e) {}
 let dataSentToBot = false;
 
 // Version
-const VERSION = 'v2.2';
+const VERSION = 'v2.3';
 console.log('LOE WebApp ' + VERSION);
+
+// ============ FIREBASE CONFIG ============
+// Твій Firebase проект - заміни на свої дані
+const firebaseConfig = {
+    apiKey: "AIzaSyExample",  // Замінити на свій
+    authDomain: "loenergo.firebaseapp.com",
+    databaseURL: "https://loenergo-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "loenergo",
+    storageBucket: "loenergo.appspot.com",
+    messagingSenderId: "123456789",
+    appId: "1:123456789:web:abc123"
+};
+
+// Ініціалізація Firebase
+let firebaseApp = null;
+let firebaseDb = null;
+
+try {
+    firebaseApp = firebase.initializeApp(firebaseConfig);
+    firebaseDb = firebase.database();
+    console.log('Firebase initialized');
+} catch(e) {
+    console.error('Firebase init error:', e);
+}
+
+// Отримати Telegram user ID
+function getTelegramUserId() {
+    try {
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            return tg.initDataUnsafe.user.id;
+        }
+    } catch(e) {}
+    return null;
+}
 
 // API Configuration - завжди використовуємо CORS proxy для швидкості
 const API_BASE = 'https://power-api.loe.lviv.ua/api';
@@ -97,13 +131,64 @@ const elements = {
 
 // ============ STORAGE ============
 function saveAddress(data) {
+    // Зберігаємо локально
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        return true;
     } catch(e) {
         console.error('Cannot save to localStorage:', e);
+    }
+    
+    // Зберігаємо в Firebase
+    saveAddressToFirebase(data);
+    
+    return true;
+}
+
+// Зберегти адресу в Firebase
+async function saveAddressToFirebase(data) {
+    const userId = getTelegramUserId();
+    if (!userId || !firebaseDb) {
+        console.log('Cannot save to Firebase: no userId or db');
         return false;
     }
+    
+    try {
+        const userRef = firebaseDb.ref('users/' + userId);
+        await userRef.set({
+            city_id: data.city_id || null,
+            city_name: data.city_name || '',
+            street_id: data.street_id || null,
+            street_name: data.street_name || '',
+            building_name: data.building_name || '',
+            cherg_gpv: data.cherg_gpv || '',
+            updated_at: Date.now()
+        });
+        console.log('Saved to Firebase for user:', userId);
+        return true;
+    } catch(e) {
+        console.error('Firebase save error:', e);
+        return false;
+    }
+}
+
+// Завантажити адресу з Firebase
+async function loadAddressFromFirebase() {
+    const userId = getTelegramUserId();
+    if (!userId || !firebaseDb) {
+        return null;
+    }
+    
+    try {
+        const snapshot = await firebaseDb.ref('users/' + userId).once('value');
+        const data = snapshot.val();
+        if (data && data.cherg_gpv) {
+            console.log('Loaded from Firebase:', data);
+            return data;
+        }
+    } catch(e) {
+        console.error('Firebase load error:', e);
+    }
+    return null;
 }
 
 function loadSavedAddress() {
@@ -975,7 +1060,7 @@ function setupEventListeners() {
 }
 
 // ============ INIT ============
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     tg.ready();
     
     // Apply Telegram theme
@@ -992,8 +1077,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // Почати завантаження міст паралельно (для швидкості)
     loadCities().catch(() => {});
     
-    // Check for saved address
-    const saved = loadSavedAddress();
+    // Спочатку спробуємо завантажити з Firebase, потім з localStorage
+    let saved = null;
+    
+    // Завантажити з Firebase (пріоритет)
+    const firebaseSaved = await loadAddressFromFirebase();
+    if (firebaseSaved && firebaseSaved.cherg_gpv) {
+        saved = firebaseSaved;
+        // Синхронізувати з localStorage
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(firebaseSaved));
+        } catch(e) {}
+        console.log('Using Firebase data');
+    } else {
+        // Якщо в Firebase немає, беремо з localStorage
+        saved = loadSavedAddress();
+        console.log('Using localStorage data');
+    }
+    
     if (saved && saved.city_name && saved.cherg_gpv) {
         state.savedAddress = saved;
         displaySavedAddress(saved);
