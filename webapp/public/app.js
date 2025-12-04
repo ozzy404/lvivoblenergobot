@@ -7,29 +7,22 @@ try { tg.enableClosingConfirmation(); } catch(e) {}
 let dataSentToBot = false;
 
 // Version
-const VERSION = 'v2.3';
+const VERSION = 'v2.4';
 console.log('LOE WebApp ' + VERSION);
 
-// ============ FIREBASE CONFIG ============
-// Твій Firebase проект - заміни на свої дані
-const firebaseConfig = {
-    apiKey: "AIzaSyExample",  // Замінити на свій
-    authDomain: "loenergo.firebaseapp.com",
-    databaseURL: "https://loenergo-default-rtdb.europe-west1.firebasedatabase.app",
-    projectId: "loenergo",
-    storageBucket: "loenergo.appspot.com",
-    messagingSenderId: "123456789",
-    appId: "1:123456789:web:abc123"
-};
-
-// Ініціалізація Firebase
+// ============ FIREBASE INIT ============
+// Конфіг читається з firebase-config.js (окремий файл, не в git)
 let firebaseApp = null;
 let firebaseDb = null;
 
 try {
-    firebaseApp = firebase.initializeApp(firebaseConfig);
-    firebaseDb = firebase.database();
-    console.log('Firebase initialized');
+    if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY") {
+        firebaseApp = firebase.initializeApp(window.FIREBASE_CONFIG);
+        firebaseDb = firebase.database();
+        console.log('Firebase initialized successfully');
+    } else {
+        console.warn('Firebase config not set! Edit firebase-config.js');
+    }
 } catch(e) {
     console.error('Firebase init error:', e);
 }

@@ -7,15 +7,16 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # Web App URL
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://your-project.web.app")
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://loenergo.web.app")
 
 # LOE API
 LOE_API_BASE = os.getenv("LOE_API_BASE", "https://power-api.loe.lviv.ua/api")
 LOE_MAIN_API_BASE = os.getenv("LOE_MAIN_API_BASE", "https://api.loe.lviv.ua/api")
 
 # Firebase Realtime Database URL
+# ⚠️ ОБОВ'ЯЗКОВО ВСТАНОВИТИ В .env!
 # Формат: https://PROJECT-ID-default-rtdb.REGION.firebasedatabase.app
-FIREBASE_DATABASE_URL = os.getenv("FIREBASE_DATABASE_URL", "https://loenergo-default-rtdb.europe-west1.firebasedatabase.app")
+FIREBASE_DATABASE_URL = os.getenv("FIREBASE_DATABASE_URL")
 
 # Notification settings
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 5))  # minutes

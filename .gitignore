@@ -1,0 +1,4 @@
+
+# Firebase config (contains secrets)
+webapp/public/firebase-config.js
+bot/.env
