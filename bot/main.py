@@ -4,6 +4,7 @@ Main entry point
 """
 import asyncio
 import logging
+import sys
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -12,7 +13,7 @@ from telegram.ext import (
     filters
 )
 
-from config import BOT_TOKEN
+from config import BOT_TOKEN, LOG_LEVEL, DEBUG_MODE
 from database import db
 from handlers import (
     start_command,
@@ -26,19 +27,32 @@ from notifications import NotificationService
 from api_service import api_service
 from firebase_service import firebase_service
 
-# Configure logging
+# Configure logging - мінімізуємо для економії квоти
+log_level = getattr(logging, LOG_LEVEL.upper(), logging.WARNING)
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=log_level,
+    stream=sys.stdout
 )
+# Вимикаємо логування від бібліотек
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+logging.getLogger("aiohttp").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+# Перевизначаємо print на пустую функцію в продакшені
+if not DEBUG_MODE:
+    import builtins
+    _original_print = builtins.print
+    def silent_print(*args, **kwargs):
+        pass  # Нічого не виводимо
+    builtins.print = silent_print
 
 
 async def post_init(application: Application):
     """Post initialization hook"""
     # Initialize database
     await db.init_db()
-    logger.info("Database initialized")
     
     # Start notification service
     from notifications import notification_service
@@ -47,7 +61,6 @@ async def post_init(application: Application):
     
     # Run notification service in background
     asyncio.create_task(notifications.notification_service.start())
-    logger.info("Notification service started")
 
 
 async def shutdown(application: Application):

@@ -7,8 +7,11 @@ try { tg.enableClosingConfirmation(); } catch(e) {}
 let dataSentToBot = false;
 
 // Version
-const VERSION = 'v2.4';
-console.log('LOE WebApp ' + VERSION);
+const VERSION = 'v2.5';
+
+// Вимикаємо console.log в продакшені (економія квоти)
+const DEBUG = false;
+const log = DEBUG ? console.log.bind(console) : () => {};
 
 // ============ FIREBASE INIT ============
 // Конфіг читається з firebase-config.js (окремий файл, не в git)
@@ -19,7 +22,7 @@ try {
     if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY") {
         firebaseApp = firebase.initializeApp(window.FIREBASE_CONFIG);
         firebaseDb = firebase.database();
-        console.log('Firebase initialized successfully');
+        log('Firebase initialized successfully');
     } else {
         console.warn('Firebase config not set! Edit firebase-config.js');
     }
@@ -141,7 +144,7 @@ function saveAddress(data) {
 async function saveAddressToFirebase(data) {
     const userId = getTelegramUserId();
     if (!userId || !firebaseDb) {
-        console.log('Cannot save to Firebase: no userId or db');
+        log('Cannot save to Firebase: no userId or db');
         return false;
     }
     
@@ -156,7 +159,7 @@ async function saveAddressToFirebase(data) {
             cherg_gpv: data.cherg_gpv || '',
             updated_at: Date.now()
         });
-        console.log('Saved to Firebase for user:', userId);
+        log('Saved to Firebase for user:', userId);
         return true;
     } catch(e) {
         console.error('Firebase save error:', e);
@@ -175,7 +178,7 @@ async function loadAddressFromFirebase() {
         const snapshot = await firebaseDb.ref('users/' + userId).once('value');
         const data = snapshot.val();
         if (data && data.cherg_gpv) {
-            console.log('Loaded from Firebase:', data);
+            log('Loaded from Firebase:', data);
             return data;
         }
     } catch(e) {
@@ -319,31 +322,54 @@ function getTomorrowDate() {
 }
 
 // Check if current time is within an outage period
-function getCurrentPowerStatus(outages) {
+// Враховує графік на завтра для відліку через північ (22-24 + 00-05)
+function getCurrentPowerStatus(todayOutages, tomorrowOutages = []) {
     const now = new Date();
     const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+    const SECONDS_IN_DAY = 24 * 3600;
     
-    for (const outage of outages) {
+    // Перевіряємо чи зараз відключення (сьогодні)
+    for (const outage of todayOutages) {
         const [startH, startM] = outage.start.split(':').map(Number);
         const [endH, endM] = outage.end.split(':').map(Number);
         const startSeconds = startH * 3600 + startM * 60;
         const endSeconds = endH * 3600 + endM * 60;
         
         if (currentSeconds >= startSeconds && currentSeconds < endSeconds) {
+            // Зараз відключення - шукаємо коли буде світло
+            let nextPowerOnSeconds = endSeconds - currentSeconds;
+            
+            // Перевіряємо чи відключення продовжується завтра з 00:00
+            if (endH === 24 || endH === 0) {
+                // Кінець в 24:00 - перевіряємо чи завтра з 00:00 продовжується
+                const tomorrowContinues = tomorrowOutages.find(o => {
+                    const [h, m] = o.start.split(':').map(Number);
+                    return h === 0 && m === 0;
+                });
+                
+                if (tomorrowContinues) {
+                    // Завтра продовжується з 00:00 - шукаємо коли закінчиться
+                    const [endTomorrowH, endTomorrowM] = tomorrowContinues.end.split(':').map(Number);
+                    const endTomorrowSeconds = endTomorrowH * 3600 + endTomorrowM * 60;
+                    // Час до кінця сьогодні + час відключення завтра
+                    nextPowerOnSeconds = (SECONDS_IN_DAY - currentSeconds) + endTomorrowSeconds;
+                }
+            }
+            
             return {
                 hasPower: false,
                 currentOutage: outage,
-                nextChange: outage.end,
-                nextChangeSeconds: endSeconds - currentSeconds
+                nextChange: null, // Буде обчислено з секунд
+                nextChangeSeconds: nextPowerOnSeconds
             };
         }
     }
     
-    // Find next outage
+    // Зараз світло є - шукаємо наступне відключення
     let nextOutage = null;
     let minDiff = Infinity;
     
-    for (const outage of outages) {
+    for (const outage of todayOutages) {
         const [startH, startM] = outage.start.split(':').map(Number);
         const startSeconds = startH * 3600 + startM * 60;
         const diff = startSeconds - currentSeconds;
@@ -351,6 +377,19 @@ function getCurrentPowerStatus(outages) {
         if (diff > 0 && diff < minDiff) {
             minDiff = diff;
             nextOutage = outage;
+        }
+    }
+    
+    // Якщо немає відключень сьогодні - перевіряємо завтра
+    if (!nextOutage && tomorrowOutages.length > 0) {
+        // Перше відключення завтра
+        const firstTomorrow = tomorrowOutages[0];
+        if (firstTomorrow) {
+            const [startH, startM] = firstTomorrow.start.split(':').map(Number);
+            const startSeconds = startH * 3600 + startM * 60;
+            // Час до кінця сьогодні + час до першого відключення завтра
+            minDiff = (SECONDS_IN_DAY - currentSeconds) + startSeconds;
+            nextOutage = firstTomorrow;
         }
     }
     
@@ -375,7 +414,9 @@ function formatSecondsToTime(totalSeconds) {
 function updateTimer() {
     if (!state.currentSchedule) return;
     
-    const status = getCurrentPowerStatus(state.currentSchedule.outages);
+    // Передаємо графік на завтра для коректного відліку через північ
+    const tomorrowOutages = state.tomorrowSchedule?.outages || [];
+    const status = getCurrentPowerStatus(state.currentSchedule.outages, tomorrowOutages);
     const prevStatus = state.currentPowerStatus;
     state.currentPowerStatus = status;
     
@@ -523,7 +564,7 @@ async function loadCities() {
     try {
         state.cities = await fetchData('/pw_cities?pagination=false');
         if (!isBackground) hideLoading();
-        console.log(`Loaded ${state.cities.length} cities`);
+        log(`Loaded ${state.cities.length} cities`);
     } catch (error) {
         if (!isBackground) showError('Не вдалося завантажити населені пункти');
     }
@@ -576,7 +617,7 @@ async function loadBuildings(cityId, streetId) {
         hideLoading();
         enableStep('building');
         elements.buildingSearch.focus();
-        console.log(`Loaded ${uniqueBuildings.length} unique buildings`);
+        log(`Loaded ${uniqueBuildings.length} unique buildings`);
     } catch (error) {
         console.error('Error loading buildings:', error);
         showError('Не вдалося завантажити будинки');
@@ -611,7 +652,7 @@ function setupSettingsButton() {
             });
         }
     } catch(e) {
-        console.log('SettingsButton not available:', e);
+        log('SettingsButton not available:', e);
     }
 }
 
@@ -644,7 +685,7 @@ async function resetAllData() {
         const userId = getTelegramUserId();
         if (userId && firebaseDb) {
             await firebaseDb.ref('users/' + userId).remove();
-            console.log('Deleted from Firebase');
+            log('Deleted from Firebase');
         }
         
         // Скидаємо стан
@@ -692,9 +733,9 @@ function syncAddressWithBot() {
         tg.HapticFeedback.notificationOccurred('success');
         tg.sendData(JSON.stringify(data));
         dataSentToBot = true;
-        console.log('Address synced with bot');
+        log('Address synced with bot');
     } catch(e) {
-        console.log('Cannot sync with bot:', e);
+        log('Cannot sync with bot:', e);
     }
 }
 
@@ -973,7 +1014,7 @@ function submitSelection() {
         tg.sendData(JSON.stringify(data));
         dataSentToBot = true;
     } catch(e) {
-        console.log('Not in Telegram WebApp context');
+        log('Not in Telegram WebApp context');
     }
     
     // Show saved view with schedule
@@ -1113,7 +1154,7 @@ function setupEventListeners() {
             }
         });
     } catch(e) {
-        console.log('BackButton handler not available:', e);
+        log('BackButton handler not available:', e);
     }
 }
 
@@ -1146,11 +1187,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(firebaseSaved));
         } catch(e) {}
-        console.log('Using Firebase data');
+        log('Using Firebase data');
     } else {
         // Якщо в Firebase немає, беремо з localStorage
         saved = loadSavedAddress();
-        console.log('Using localStorage data');
+        log('Using localStorage data');
     }
     
     if (saved && saved.city_name && saved.cherg_gpv) {

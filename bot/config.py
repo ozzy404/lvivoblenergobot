@@ -23,3 +23,8 @@ CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 5))  # minutes
 
 # Database (local SQLite as fallback)
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), "data", "users.db")
+
+# Logging level: DEBUG, INFO, WARNING, ERROR
+# На продакшені встановити WARNING або ERROR для економії квоти
+LOG_LEVEL = os.getenv("LOG_LEVEL", "WARNING")
+DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"

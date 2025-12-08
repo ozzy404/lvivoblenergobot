@@ -110,6 +110,17 @@ class Database:
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
             """)
+            
+            # Таблиця для збереження останнього повідомлення з графіком (для редагування)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_last_schedule_message (
+                    user_id INTEGER PRIMARY KEY,
+                    message_id INTEGER NOT NULL,
+                    schedule_date TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
 
             await db.commit()
     
@@ -410,6 +421,32 @@ class Database:
                 return True
             except Exception as e:
                 print(f"Error saving user schedule hash: {e}")
+                return False
+    
+    async def get_user_last_message(self, user_id: int) -> Optional[Dict]:
+        """Отримати останнє повідомлення з графіком для редагування"""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("""
+                SELECT message_id, schedule_date FROM user_last_schedule_message 
+                WHERE user_id = ?
+            """, (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return {"message_id": row[0], "schedule_date": row[1]}
+                return None
+    
+    async def save_user_last_message(self, user_id: int, message_id: int, schedule_date: str = None) -> bool:
+        """Зберегти останнє повідомлення з графіком"""
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                await db.execute("""
+                    INSERT OR REPLACE INTO user_last_schedule_message 
+                    (user_id, message_id, schedule_date, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                """, (user_id, message_id, schedule_date))
+                await db.commit()
+                return True
+            except Exception as e:
                 return False
     
     async def save_schedule_hash(self, schedule_date: str, image_url: str, raw_html: str = None) -> bool:
