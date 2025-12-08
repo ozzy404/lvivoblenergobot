@@ -14,8 +14,8 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
     <!-- Firebase Config (окремий файл - не в git!) -->
-    <script src="firebase-config.js?v=20251208195751"></script>
-    <link rel="stylesheet" href="styles.css?v=20251208195751">
+    <script src="firebase-config.js?v=20251208204855"></script>
+    <link rel="stylesheet" href="styles.css?v=20251208204855">
 </head>
 <body>
     <div class="app">
@@ -39,7 +39,10 @@
                             <h3>📍 Ваша адреса</h3>
                             <p id="saved-address-text"></p>
                         </div>
-                        <button class="change-btn" id="change-address-btn">✏️ Змінити</button>
+                        <div class="address-buttons">
+                            <button class="icon-btn settings-btn" id="notification-settings-btn" title="Налаштування сповіщень">🔔</button>
+                            <button class="change-btn" id="change-address-btn">✏️ Змінити</button>
+                        </div>
                     </div>
                     <div class="saved-group">
                         <span class="saved-group-label">Група ГПВ:</span>
@@ -155,8 +158,85 @@
                 ✅ Зберегти адресу
             </button>
         </div>
+        
+        <!-- Notification Settings Modal -->
+        <div class="modal-overlay" id="settings-modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>🔔 Налаштування сповіщень</h2>
+                    <button class="modal-close" id="settings-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="settings-list">
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-icon">📋</span>
+                                <div class="setting-text">
+                                    <span class="setting-title">Зміни графіку</span>
+                                    <span class="setting-desc">Повідомляти коли графік оновився</span>
+                                </div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-schedule-change">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-icon">🔌</span>
+                                <div class="setting-text">
+                                    <span class="setting-title">Світло вимкнули</span>
+                                    <span class="setting-desc">Сповіщення коли почалось відключення</span>
+                                </div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-power-off">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-icon">💡</span>
+                                <div class="setting-text">
+                                    <span class="setting-title">Світло увімкнули</span>
+                                    <span class="setting-desc">Сповіщення коли світло повернулось</span>
+                                </div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-power-on">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <span class="setting-icon">⏰</span>
+                                <div class="setting-text">
+                                    <span class="setting-title">Попередження</span>
+                                    <span class="setting-desc">Сповіщення за N хвилин до відключення</span>
+                                </div>
+                            </div>
+                            <select id="setting-before-minutes" class="setting-select">
+                                <option value="0">Вимкнено</option>
+                                <option value="5">5 хв</option>
+                                <option value="10">10 хв</option>
+                                <option value="15">15 хв</option>
+                                <option value="30">30 хв</option>
+                                <option value="60">60 хв</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-footer">
+                        <button class="reset-btn" id="reset-data-btn">🗑 Скинути всі дані</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     
-    <script src="app.js?v=20251208195751"></script>
+    <script src="app.js?v=20251208204855"></script>
 </body>
 </html>

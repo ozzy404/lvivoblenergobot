@@ -98,14 +98,48 @@ class FirebaseService:
                 timeout=aiohttp.ClientTimeout(total=15)
             ) as resp:
                 if resp.status == 200:
-                    print(f"[FIREBASE] Set notifications={enabled} for user {user_id}")
                     return True
-                else:
-                    body = await resp.text()
-                    print(f"[FIREBASE] Error setting notifications: {resp.status} - {body}")
-        except Exception as exc:
-            print(f"[FIREBASE] Error setting notifications for user {user_id}: {exc}")
+        except Exception:
+            pass
         return False
+
+    async def save_notification_settings(self, user_id: int, settings: Dict[str, Any]) -> bool:
+        """Зберегти налаштування сповіщень користувача"""
+        if not self.database_url:
+            return False
+
+        url = f"{self.database_url}/users/{user_id}/notification_settings.json"
+
+        try:
+            session = await self._get_session()
+            async with session.put(
+                url,
+                json=settings,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
+                return resp.status == 200
+        except Exception:
+            pass
+        return False
+
+    async def get_notification_settings(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Отримати налаштування сповіщень користувача"""
+        if not self.database_url:
+            return None
+
+        url = f"{self.database_url}/users/{user_id}/notification_settings.json"
+
+        try:
+            session = await self._get_session()
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+        except Exception:
+            pass
+        return None
 
     async def delete_user_profile(self, user_id: int) -> bool:
         """Delete user profile from Firebase Realtime Database"""

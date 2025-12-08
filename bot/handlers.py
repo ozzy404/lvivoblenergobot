@@ -178,6 +178,23 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "cancel_reset":
         await show_settings_menu(query, user_id)
     
+    # Нові обробники для налаштувань сповіщень
+    elif data == "toggle_schedule_change":
+        await toggle_notification_setting(query, user_id, "schedule_change")
+    
+    elif data == "toggle_power_off":
+        await toggle_notification_setting(query, user_id, "power_off")
+    
+    elif data == "toggle_power_on":
+        await toggle_notification_setting(query, user_id, "power_on")
+    
+    elif data == "set_before_minutes":
+        await show_before_minutes_menu(query, user_id)
+    
+    elif data.startswith("before_"):
+        minutes = int(data.replace("before_", ""))
+        await set_before_minutes(query, user_id, minutes)
+    
     elif data == "help":
         await show_help(query)
     
@@ -369,33 +386,55 @@ async def show_settings_menu(query, user_id: int):
     """Показати меню налаштувань"""
     from firebase_service import firebase_service
     
-    # Отримуємо статус сповіщень
-    profile = await firebase_service.get_user_profile(user_id)
-    notifications_enabled = profile.get('notifications_enabled', False) if profile else False
+    # Отримуємо налаштування сповіщень
+    settings = await firebase_service.get_notification_settings(user_id)
+    if not settings:
+        settings = {
+            "schedule_change": False,
+            "power_on": False,
+            "power_off": False,
+            "before_minutes": 0
+        }
     
-    notif_status = "🔔 Увімкнено" if notifications_enabled else "🔕 Вимкнено"
+    # Формуємо текст статусу
+    schedule_status = "✅" if settings.get("schedule_change") else "❌"
+    power_off_status = "✅" if settings.get("power_off") else "❌"
+    power_on_status = "✅" if settings.get("power_on") else "❌"
+    before_mins = settings.get("before_minutes", 0)
+    before_status = f"✅ {before_mins} хв" if before_mins > 0 else "❌"
     
     text = (
-        "⚙️ <b>Налаштування</b>\n\n"
-        f"📢 <b>Сповіщення:</b> {notif_status}\n"
-        "   Отримувати повідомлення про зміни графіку\n\n"
-        "🗑 <b>Скинути дані:</b>\n"
-        "   Видалити всі збережені дані (адреса, налаштування)"
+        "⚙️ <b>Налаштування сповіщень</b>\n\n"
+        f"📋 <b>Зміни графіку:</b> {schedule_status}\n"
+        "   Повідомляти коли графік оновився\n\n"
+        f"🔌 <b>Світло вимкнули:</b> {power_off_status}\n"
+        "   Сповіщення коли почалось відключення\n\n"
+        f"💡 <b>Світло увімкнули:</b> {power_on_status}\n"
+        "   Сповіщення коли світло повернулось\n\n"
+        f"⏰ <b>Попередження:</b> {before_status}\n"
+        "   Сповіщення за N хвилин до відключення"
     )
     
-    buttons = []
-    
-    # Кнопка сповіщень
-    if notifications_enabled:
-        buttons.append([InlineKeyboardButton("🔕 Вимкнути сповіщення", callback_data="disable_notifications")])
-    else:
-        buttons.append([InlineKeyboardButton("🔔 Увімкнути сповіщення", callback_data="enable_notifications")])
-    
-    # Кнопка скидання
-    buttons.append([InlineKeyboardButton("🗑 Скинути всі дані", callback_data="reset_data")])
-    
-    # Назад
-    buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")])
+    buttons = [
+        [InlineKeyboardButton(
+            f"{'🔔' if settings.get('schedule_change') else '🔕'} Зміни графіку",
+            callback_data="toggle_schedule_change"
+        )],
+        [InlineKeyboardButton(
+            f"{'🔔' if settings.get('power_off') else '🔕'} Світло вимкнули",
+            callback_data="toggle_power_off"
+        )],
+        [InlineKeyboardButton(
+            f"{'🔔' if settings.get('power_on') else '🔕'} Світло увімкнули",
+            callback_data="toggle_power_on"
+        )],
+        [InlineKeyboardButton(
+            f"⏰ Попередження: {before_mins} хв",
+            callback_data="set_before_minutes"
+        )],
+        [InlineKeyboardButton("🗑 Скинути всі дані", callback_data="reset_data")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]
+    ]
     
     await safe_edit_message(
         query,
@@ -403,6 +442,92 @@ async def show_settings_menu(query, user_id: int):
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode=ParseMode.HTML
     )
+
+
+async def toggle_notification_setting(query, user_id: int, setting_key: str):
+    """Перемкнути налаштування сповіщення"""
+    from firebase_service import firebase_service
+    
+    settings = await firebase_service.get_notification_settings(user_id)
+    if not settings:
+        settings = {
+            "schedule_change": False,
+            "power_on": False,
+            "power_off": False,
+            "before_minutes": 0
+        }
+    
+    # Перемикаємо значення
+    settings[setting_key] = not settings.get(setting_key, False)
+    
+    # Зберігаємо
+    await firebase_service.save_notification_settings(user_id, settings)
+    
+    status = "увімкнено ✅" if settings[setting_key] else "вимкнено ❌"
+    await query.answer(f"Сповіщення {status}")
+    
+    # Оновлюємо меню
+    await show_settings_menu(query, user_id)
+
+
+async def show_before_minutes_menu(query, user_id: int):
+    """Показати меню вибору часу попередження"""
+    from firebase_service import firebase_service
+    
+    settings = await firebase_service.get_notification_settings(user_id)
+    current = settings.get("before_minutes", 0) if settings else 0
+    
+    text = (
+        "⏰ <b>Попередження про відключення</b>\n\n"
+        f"Поточне значення: <b>{current} хв</b>\n\n"
+        "За скільки хвилин до відключення сповіщати?\n"
+        "Оберіть варіант або вимкніть (0):"
+    )
+    
+    buttons = [
+        [
+            InlineKeyboardButton("❌ Вимкнути", callback_data="before_0"),
+            InlineKeyboardButton("5 хв", callback_data="before_5"),
+            InlineKeyboardButton("10 хв", callback_data="before_10"),
+        ],
+        [
+            InlineKeyboardButton("15 хв", callback_data="before_15"),
+            InlineKeyboardButton("30 хв", callback_data="before_30"),
+            InlineKeyboardButton("60 хв", callback_data="before_60"),
+        ],
+        [InlineKeyboardButton("🔙 Назад", callback_data="settings")]
+    ]
+    
+    await safe_edit_message(
+        query,
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def set_before_minutes(query, user_id: int, minutes: int):
+    """Встановити час попередження"""
+    from firebase_service import firebase_service
+    
+    settings = await firebase_service.get_notification_settings(user_id)
+    if not settings:
+        settings = {
+            "schedule_change": False,
+            "power_on": False,
+            "power_off": False,
+            "before_minutes": 0
+        }
+    
+    settings["before_minutes"] = minutes
+    await firebase_service.save_notification_settings(user_id, settings)
+    
+    if minutes > 0:
+        await query.answer(f"✅ Попередження за {minutes} хв")
+    else:
+        await query.answer("❌ Попередження вимкнено")
+    
+    await show_settings_menu(query, user_id)
 
 
 async def show_reset_confirmation(query, user_id: int):

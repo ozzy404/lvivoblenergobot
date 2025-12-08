@@ -122,7 +122,17 @@ const elements = {
     submitBtn: document.getElementById('submit-btn'),
     loading: document.getElementById('loading'),
     error: document.getElementById('error'),
-    errorMessage: document.getElementById('error-message')
+    errorMessage: document.getElementById('error-message'),
+    
+    // Notification Settings Modal
+    notificationSettingsBtn: document.getElementById('notification-settings-btn'),
+    settingsModal: document.getElementById('settings-modal'),
+    settingsClose: document.getElementById('settings-close'),
+    settingScheduleChange: document.getElementById('setting-schedule-change'),
+    settingPowerOff: document.getElementById('setting-power-off'),
+    settingPowerOn: document.getElementById('setting-power-on'),
+    settingBeforeMinutes: document.getElementById('setting-before-minutes'),
+    resetDataBtn: document.getElementById('reset-data-btn')
 };
 
 // ============ STORAGE ============
@@ -648,11 +658,131 @@ function setupSettingsButton() {
         if (tg.SettingsButton) {
             tg.SettingsButton.show();
             tg.SettingsButton.onClick(() => {
-                showResetConfirmation();
+                openSettingsModal();
             });
         }
     } catch(e) {
         log('SettingsButton not available:', e);
+    }
+    
+    // Кнопка налаштувань в UI
+    if (elements.notificationSettingsBtn) {
+        elements.notificationSettingsBtn.addEventListener('click', openSettingsModal);
+    }
+    
+    // Закриття модального вікна
+    if (elements.settingsClose) {
+        elements.settingsClose.addEventListener('click', closeSettingsModal);
+    }
+    
+    // Закриття по кліку на overlay
+    if (elements.settingsModal) {
+        elements.settingsModal.addEventListener('click', (e) => {
+            if (e.target === elements.settingsModal) {
+                closeSettingsModal();
+            }
+        });
+    }
+    
+    // Обробники зміни налаштувань
+    if (elements.settingScheduleChange) {
+        elements.settingScheduleChange.addEventListener('change', saveNotificationSettings);
+    }
+    if (elements.settingPowerOff) {
+        elements.settingPowerOff.addEventListener('change', saveNotificationSettings);
+    }
+    if (elements.settingPowerOn) {
+        elements.settingPowerOn.addEventListener('change', saveNotificationSettings);
+    }
+    if (elements.settingBeforeMinutes) {
+        elements.settingBeforeMinutes.addEventListener('change', saveNotificationSettings);
+    }
+    
+    // Кнопка скидання даних
+    if (elements.resetDataBtn) {
+        elements.resetDataBtn.addEventListener('click', () => {
+            closeSettingsModal();
+            showResetConfirmation();
+        });
+    }
+}
+
+// Відкрити модальне вікно налаштувань
+async function openSettingsModal() {
+    // Завантажуємо поточні налаштування з Firebase
+    await loadNotificationSettings();
+    
+    if (elements.settingsModal) {
+        elements.settingsModal.style.display = 'flex';
+        try {
+            tg.HapticFeedback.impactOccurred('light');
+        } catch(e) {}
+    }
+}
+
+// Закрити модальне вікно налаштувань
+function closeSettingsModal() {
+    if (elements.settingsModal) {
+        elements.settingsModal.style.display = 'none';
+    }
+}
+
+// Завантажити налаштування сповіщень з Firebase
+async function loadNotificationSettings() {
+    const userId = getTelegramUserId();
+    if (!userId || !firebaseDb) {
+        log('Cannot load settings: no userId or db');
+        return;
+    }
+    
+    try {
+        const snapshot = await firebaseDb.ref('users/' + userId + '/notification_settings').once('value');
+        const settings = snapshot.val() || {};
+        
+        // Встановлюємо значення в UI
+        if (elements.settingScheduleChange) {
+            elements.settingScheduleChange.checked = settings.schedule_change || false;
+        }
+        if (elements.settingPowerOff) {
+            elements.settingPowerOff.checked = settings.power_off || false;
+        }
+        if (elements.settingPowerOn) {
+            elements.settingPowerOn.checked = settings.power_on || false;
+        }
+        if (elements.settingBeforeMinutes) {
+            elements.settingBeforeMinutes.value = settings.before_minutes || 0;
+        }
+        
+        log('Notification settings loaded:', settings);
+    } catch(e) {
+        console.error('Error loading notification settings:', e);
+    }
+}
+
+// Зберегти налаштування сповіщень в Firebase
+async function saveNotificationSettings() {
+    const userId = getTelegramUserId();
+    if (!userId || !firebaseDb) {
+        log('Cannot save settings: no userId or db');
+        return;
+    }
+    
+    const settings = {
+        schedule_change: elements.settingScheduleChange?.checked || false,
+        power_off: elements.settingPowerOff?.checked || false,
+        power_on: elements.settingPowerOn?.checked || false,
+        before_minutes: parseInt(elements.settingBeforeMinutes?.value) || 0
+    };
+    
+    try {
+        await firebaseDb.ref('users/' + userId + '/notification_settings').set(settings);
+        log('Notification settings saved:', settings);
+        
+        try {
+            tg.HapticFeedback.impactOccurred('light');
+        } catch(e) {}
+    } catch(e) {
+        console.error('Error saving notification settings:', e);
     }
 }
 
